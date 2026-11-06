@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phases 0 and 1 passed on 2026-11-06. Phase 2 is in progress: the furnace matches vanilla's tick for tick. Energy and fluid transfer are next.
+Status: Phases 0, 1 and 2 passed on 2026-11-06. Phase 3 is next.
 
 ## Source and target
 
@@ -64,9 +64,9 @@ Known gaps:
 - Ore counts aren't compared with Java, and they differ by a few blocks between runs of one seed (tin 12,509-12,517, uranium constant). The cause is unknown.
 - Salt and dedicated servers are untested.
 
-## Phase 2 progress
+## Phase 2 result
 
-`port/test_phase2.py` runs a mod furnace (`port/machine`) beside a vanilla one in single player, through 9 scenarios and a reload. No trace row differs across about 700 ticks each. The furnace's menu opens with the same slots as vanilla's, a shift-click takes its output, and a screenshot shows the flame and progress arrow.
+`port/test_phase2.py` runs a mod furnace (`port/machine`) beside a vanilla one through 9 scenarios and a reload, in single player and on a dedicated server. No trace row differs across about 700 ticks each. The furnace's menu opens with the same slots as vanilla's, a shift-click takes its output, and a screenshot shows the flame and progress arrow.
 
 The comparison is against Horizon's vanilla furnace, which Horizon's harnesses check against Java. No Java run is involved here.
 
@@ -77,7 +77,13 @@ Known gaps:
 - A hopper can put any item in the fuel slot, where vanilla takes only fuel, and can't pull a bucket out of it.
 - The input check compares item ids, so swapping to the same item with other components doesn't restart cooking.
 - The block has no language file, so the menu's title shows `block.mekmachine.furnace`.
-- Experience, stats, comparator output and dedicated servers are untested.
+- Experience, stats and comparator output are untested.
+- `native_block_entity_update_tag` is unused, and no client has joined a dedicated server in these tests. The menu's data slots and the `lit` state reach a single-player client.
+- The transfer test blocks are stand-ins, not Mekanism's machines, and their rates are the test's own.
+
+`port/test_transfer.py` moves energy and fluids along 6 lines of test blocks, in single player and on a dedicated server. Rates are exact until the stores fill, a face that refuses takes nothing, a tank keeps its first fluid, and a reload finds the same amounts.
+
+A block entity is out of the world during its own tick, so Horizon's energy and fluid helpers answer 0 for it. A machine offers to its neighbour and subtracts what was taken (`port/machine/engine/src/transfer.rs`). A cable or pipe holds nothing, so the helpers' moves between its two neighbours work.
 
 Builds on this 8GB Mac: 4 min 32 s for the first and 2 min 7 s for a mod change, in the `dev` profile.
 

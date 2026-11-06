@@ -62,3 +62,37 @@ bindings = [
   { name = "pos", ty = "[i32; 3]", value = "pos" },
   { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
 ]
+
+[[injection]]
+id = "energy"
+hook = "block_entity_energy"
+hook_version = 1
+kind = "HEAD"
+helper = "energy.rs"
+bindings = [
+  { name = "block", ty = "&str", value = "block" },
+  { name = "energy", ty = "&mut Option<horizon_client::containers::ModEnergyBuffer>", value = "&mut *energy" },
+]
+
+[[injection]]
+id = "fluids"
+hook = "block_entity_fluids"
+hook_version = 1
+kind = "HEAD"
+helper = "fluids.rs"
+bindings = [
+  { name = "block", ty = "&str", value = "block" },
+  { name = "fluids", ty = "&mut Option<horizon_client::containers::ModFluidTanks>", value = "&mut *fluids" },
+]
+
+[[injection]]
+id = "transfer"
+hook = "block_entity_tick"
+hook_version = 1
+kind = "HEAD"
+helper = "transfer.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
+]

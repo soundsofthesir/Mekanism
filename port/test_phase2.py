@@ -4,6 +4,7 @@
 Build the game with mekmachine in it (port/README.md), then:
 
     python3 port/test_phase2.py --engine port/.work/machine-export/horizon-engine
+    python3 port/test_phase2.py --engine port/.work/machine-export/horizon-engine --dedicated --eula
 
 Each scenario stands a vanilla furnace beside a mod one and changes both in the same tick with a
 datapack function. The mod's tick writes both furnaces' slots, numbers and `lit` to a trace, and
@@ -16,8 +17,6 @@ fixed shift of one tick, and the first load, where vanilla was placed first, mus
 """
 
 import argparse
-import json
-import os
 import shutil
 import subprocess
 import sys
@@ -26,14 +25,15 @@ import time
 from pathlib import Path
 from typing import Callable, NamedTuple
 
-NIGHTLY = (
-    Path.home() / "Library/Application Support/horizon-launcher/versions/nightly-2026-11-05-f319701"
+from horizon_driver import (
+    DedicatedServer,
+    SinglePlayer,
+    TestFailure,
+    run_function,
+    write_functions,
 )
+
 WORK = Path(__file__).resolve().parent / ".work"
-CTL = NIGHTLY / "horizon-ctl"
-RESOURCES = NIGHTLY / ".local/horizon-client/26.3"
-PACK_FORMAT = 121
-TIMEOUT_SECONDS = 120
 Y = 200
 SPACING = 4
 INPUT, FUEL, OUTPUT = 0, 1, 2
@@ -46,10 +46,6 @@ MENU_SETTLE_SECONDS = 0.5
 FIRST_CONTAINER_SLOT = 300
 ARMOR_SLOT = 500
 OUTPUT_MENU_SLOT = 302
-
-
-class TestFailure(Exception):
-    pass
 
 
 class Row(NamedTuple):
@@ -153,74 +149,12 @@ def slot_commands(x: int, changes: tuple[tuple[int, str], ...]) -> list[str]:
     ]
 
 
-def write_pack(world_dir: Path) -> None:
-    pack = world_dir / "datapacks/mekmachine"
-    functions = pack / "data/mekmachine/function"
-    functions.mkdir(parents=True)
-    mcmeta = {"pack": {"description": "", "min_format": PACK_FORMAT, "max_format": PACK_FORMAT}}
-    (pack / "pack.mcmeta").write_text(json.dumps(mcmeta))
+def functions() -> dict[str, list[str]]:
+    made = {}
     for index, scenario in enumerate(SCENARIOS):
-        (functions / f"start_{scenario.name}.mcfunction").write_text(
-            "\n".join(start_commands(index, scenario)) + "\n"
-        )
-        (functions / f"later_{scenario.name}.mcfunction").write_text(
-            "\n".join(slot_commands(mod_x(index), scenario.later)) + "\n"
-        )
-
-
-class World:
-    def __init__(self, folder: Path, engine: Path, resources: Path) -> None:
-        self.socket = folder / "c.sock"
-        self.game_dir = folder / "game"
-        self.game_dir.mkdir()
-        (folder / "home").mkdir()
-        self.trace = folder / "trace.txt"
-        self.engine = engine
-        self.resources = resources
-        self.env = {
-            **os.environ,
-            "HORIZON_HOME": str(folder / "home"),
-            "HORIZON_LAUNCHER_HOME": str(folder / "launcher"),
-            "XDG_DATA_HOME": str(folder / "data"),
-            "XDG_CONFIG_HOME": str(folder / "config"),
-            "HORIZON_NO_AUDIO": "1",
-            "HORIZON_LAUNCHER_NO_SELF_UPDATE": "1",
-            "MEKMACHINE_TRACE": str(self.trace),
-        }
-
-    def ctl(self, *args: object) -> dict:
-        done = subprocess.run(
-            [str(CTL), "--socket", str(self.socket), *map(str, args)],
-            env=self.env,
-            cwd=self.game_dir,
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUT_SECONDS,
-        )
-        reply = json.loads(done.stdout or "{}")
-        if done.returncode != 0 or "error" in reply:
-            raise TestFailure(f"horizon-ctl {args}: {done.stdout}{done.stderr}")
-        return reply
-
-    def start(self) -> None:
-        self.ctl(
-            "launch", "--world", "W", "--seed", "2024", "--creative", "--offscreen", "--wait",
-            "--game", self.engine, "--resources", self.resources, "--game-dir", self.game_dir,
-        )
-
-    def stop(self) -> None:
-        self.ctl("quit")
-        deadline = time.monotonic() + TIMEOUT_SECONDS
-        while self.socket.exists() and time.monotonic() < deadline:
-            time.sleep(0.2)
-
-    def command(self, line: str) -> list[str]:
-        return self.ctl("command", line).get("chat", [])
-
-    def function(self, name: str) -> None:
-        answer = self.command(f"function mekmachine:{name}")
-        if not any("Executed" in line or "Running" in line for line in answer):
-            raise TestFailure(f"function {name} answered {answer}")
+        made[f"start_{scenario.name}"] = start_commands(index, scenario)
+        made[f"later_{scenario.name}"] = slot_commands(mod_x(index), scenario.later)
+    return made
 
 
 TraceRow = tuple[int, Row, Row]
@@ -322,40 +256,46 @@ def check_take_output(world: World) -> None:
         raise TestFailure(f"taking the output: inventory {counts}, menu {menu_slots(after)}")
 
 
-def scenario_run(world: World) -> None:
+def scenario_run(world, trace: Path) -> None:
     world.start()
-    write_pack(world.game_dir / "saves/W")
+    write_functions(world.world_dir, functions())
     world.command("reload")
     world.command(f"forceload add 0 -16 {SPACING * (len(SCENARIOS) + 1)} 16")
     for scenario in SCENARIOS:
-        world.function(f"start_{scenario.name}")
+        run_function(world, f"start_{scenario.name}")
     time.sleep(LATER_CHANGE_SECONDS)
     for scenario in SCENARIOS:
         if scenario.later:
-            world.function(f"later_{scenario.name}")
+            run_function(world, f"later_{scenario.name}")
     time.sleep(RUN_TICKS_BEFORE_RELOAD / TICKS_PER_SECOND)
-    print("Menu:")
-    check_menu(world)
-    check_take_output(world)
+    if world.has_player:
+        print("Menu:")
+        check_menu(world)
+        check_take_output(world)
     world.stop()
-    with world.trace.open("a") as trace:
-        trace.write(f"{RELOAD_MARK}\n")
+    with trace.open("a") as file:
+        file.write(f"{RELOAD_MARK}\n")
     world.start()
     time.sleep(RUN_TICKS_AFTER_RELOAD / TICKS_PER_SECOND)
     world.stop()
     print("Trace:")
-    compare(world.trace)
+    compare(trace)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--engine", type=Path, required=True)
-    parser.add_argument("--resources", type=Path, default=RESOURCES)
+    parser.add_argument("--dedicated", action="store_true")
+    parser.add_argument("--eula", action="store_true", help="you agree to the Minecraft EULA")
     args = parser.parse_args()
+    if args.dedicated and not args.eula:
+        parser.error("--dedicated writes eula=true: pass --eula if you agree to the Minecraft EULA")
     folder = Path(tempfile.mkdtemp(dir=WORK))
-    world = World(folder, args.engine.resolve(), args.resources.resolve())
+    trace = folder / "trace.txt"
+    kind = DedicatedServer if args.dedicated else SinglePlayer
+    world = kind(folder, args.engine.resolve(), {"MEKMACHINE_TRACE": trace})
     try:
-        scenario_run(world)
+        scenario_run(world, trace)
     except (TestFailure, subprocess.TimeoutExpired) as failure:
         try:
             world.stop()
