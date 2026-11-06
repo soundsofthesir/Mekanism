@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phases 0 and 1 passed on 2026-11-06. Phase 2 is next.
+Status: Phases 0 and 1 passed on 2026-11-06. Phase 2 is in progress: the furnace matches vanilla's tick for tick. Energy and fluid transfer are next.
 
 ## Source and target
 
@@ -12,6 +12,7 @@ Status: Phases 0 and 1 passed on 2026-11-06. Phase 2 is next.
 - Java code doesn't run in Horizon, so all of the mod's code needs rewriting. That is about 209k lines to port, including 39k of client code. Datagen, integrations and tests are another 45k.
 - `horizon-port-pack` carries over data, assets, worldgen and basic block and item definitions.
 - Native mods now document hooks for ticking and saved block entities (API 15), item slots (16), menus and screens (17, 19), custom recipe types (36), client sync (45), fluid tanks (54), block entity drawing (71) and energy buffers (142). Phase 0 ran the block entity hooks. The others are documented but untested here.
+- Mods can't look up vanilla fuels or smelting results through the stable API, at `f319701` or at `origin/main` on 2026-11-06. `recipes_of_type` covers only types outside `minecraft`, and no helper gives a burn time. Mixin helpers compiled inside the game can reach both tables. The Heat Generator and Energized Smelter need these.
 - API 0.4 won't arrive: #1189 closed on 2026-10-31 because main removed WebAssembly mods in favour of native ones.
 - Native mods are the only route. They are unsandboxed and compiled into a separate game build. The launcher builds them only with `--trust-native-code`, which the docs say an agent must not supply.
 - Dedicated servers run native mods through a standalone export (`native-build --server-output`).
@@ -62,6 +63,23 @@ Known gaps:
 - The 5 energy cubes have no model, and `cardboard_box` and `configurator` have no item definition.
 - Ore counts aren't compared with Java, and they differ by a few blocks between runs of one seed (tin 12,509-12,517, uranium constant). The cause is unknown.
 - Salt and dedicated servers are untested.
+
+## Phase 2 progress
+
+`port/test_phase2.py` runs a mod furnace (`port/machine`) beside a vanilla one in single player, through 9 scenarios and a reload. No trace row differs across about 700 ticks each. The furnace's menu opens with the same slots as vanilla's, a shift-click takes its output, and a screenshot shows the flame and progress arrow.
+
+The comparison is against Horizon's vanilla furnace, which Horizon's harnesses check against Java. No Java run is involved here.
+
+A reload can move the vanilla furnace after the mod's in the tick order. The test then allows one fixed shift of one tick for that load.
+
+Known gaps:
+
+- A hopper can put any item in the fuel slot, where vanilla takes only fuel, and can't pull a bucket out of it.
+- The input check compares item ids, so swapping to the same item with other components doesn't restart cooking.
+- The block has no language file, so the menu's title shows `block.mekmachine.furnace`.
+- Experience, stats, comparator output and dedicated servers are untested.
+
+Builds on this 8GB Mac: 4 min 32 s for the first and 2 min 7 s for a mod change, in the `dev` profile.
 
 ## Testing
 
