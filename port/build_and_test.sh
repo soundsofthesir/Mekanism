@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds port/machine into a game and runs the Phase 2 tests, writing port/.work/results.txt.
+# Builds port/machine into a game and runs the machine tests, writing port/.work/results.txt.
 #
 #   sh port/build_and_test.sh --trust-native-code --eula
 #
@@ -26,4 +26,5 @@ fi
     echo "== furnace, dedicated"; python3 port/test_phase2.py --engine "$ENGINE" --dedicated --eula
     echo "== transfer, single player"; python3 port/test_transfer.py --engine "$ENGINE"
     echo "== transfer, dedicated"; python3 port/test_transfer.py --engine "$ENGINE" --dedicated --eula
+    echo "== machines against the real mod"; python3 port/test_phase3.py --engine "$ENGINE" --carry port/.work/check/carry
 } 2>&1 | tee "$RESULTS"

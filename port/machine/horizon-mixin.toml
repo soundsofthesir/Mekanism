@@ -96,3 +96,15 @@ bindings = [
   { name = "pos", ty = "[i32; 3]", value = "pos" },
   { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
 ]
+
+[[injection]]
+id = "machines"
+hook = "block_entity_tick"
+hook_version = 1
+kind = "HEAD"
+helper = "machines.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
+]

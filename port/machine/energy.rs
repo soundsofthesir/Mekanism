@@ -12,7 +12,19 @@ fn mekmachine_energy(block: &str, energy: &mut Option<horizon_client::containers
         insert_faces,
         extract_faces: NONE,
     };
+    // `AttributeEnergy.STORAGE_MULTIPLIER` times the usage. A recording of the real mod shows a
+    // chamber with no upgrades charging to 20.
+    const STORAGE_MULTIPLIER: i32 = 4;
+    let machine = |usage: i32| ModEnergyBuffer {
+        capacity: usage * STORAGE_MULTIPLIER,
+        max_insert: usage * STORAGE_MULTIPLIER,
+        max_extract: 0,
+        insert_faces: ALL,
+        extract_faces: NONE,
+    };
     match block {
+        "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => *energy = Some(machine(5)),
+        "mekanism:crusher" => *energy = Some(machine(8)),
         "mekmachine:energy_gen" => {
             *energy = Some(ModEnergyBuffer {
                 capacity: 1000,

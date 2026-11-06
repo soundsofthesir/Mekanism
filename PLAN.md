@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phases 0, 1 and 2 passed on 2026-11-06. Phase 3 is in progress: the Java reference works on Tower.
+Status: Phases 0, 1 and 2 passed on 2026-11-06. Phase 3 is in progress: the Enrichment Chamber, Crusher and Energized Smelter match the real mod's recordings in Horizon, in single player. The Heat Generator and one cable with one target match in the engine only. Menus, side config, cable networks and the full chain are left.
 
 ## Source and target
 
@@ -87,6 +87,12 @@ A block entity is out of the world during its own tick, so Horizon's energy and 
 
 Builds on this 8GB Mac: 4 min 32 s for the first and 2 min 7 s for a mod change, in the `dev` profile.
 
+## Phase 3 progress
+
+`port/test_phase3.py` replays 10 recordings of the real mod in Horizon with the same `tick step` method: 1,270 ticks and no differences. It compares progress, activity, energy and both slots.
+
+`port/add_common_tags.py` is needed after the carry. Mekanism's recipes name `c:` tags that NeoForge's jar provides, and 131 of the 198 they use were missing. Without them, recipes with those ingredients find nothing, which Phase 1's 4-recipe sample didn't catch.
+
 ## Java reference
 
 `port/java_server.py` runs the real Mekanism jar on a NeoForge 26.3 server on Tower and reads machines over RCON with `tick freeze`, `tick step 1` and `data get block`. An Enrichment Chamber traced for 420 consecutive ticks: 5 energy a tick, 200 ticks a recipe, 2 dust per ore.
@@ -94,6 +100,12 @@ Builds on this 8GB Mac: 4 min 32 s for the first and 2 min 7 s for a mod change,
 - The jar is built on Tower (`./gradlew jar`, 20 minutes, needs about 6GB of memory). It holds the main module only, so the Heat Generator, in the generators module, needs another build.
 - A server with no players stops ticking after 60 seconds unless `pause-when-empty-seconds` is off.
 - `tick step` returns before the tick runs, so a read must wait for game time to move.
+- `port/java_reference.py` records 10 scenarios of the Enrichment Chamber, Crusher and Energized Smelter into `port/reference/`, and the engine's tests replay them exactly.
+- `port/java_reference_power.py` records the Heat Generator and a cube, cable and chamber chain. Machines tick first, then the cable network sends.
+- Side config indexes follow `TransmissionType`, so `config0` is energy and `config3` is items.
+- A machine with no upgrades holds 4 times its usage: a chamber holds 20.
+- A block's ambient temperature comes from its biome and height, and each side has its own. The Heat Generator's port needs this from Horizon, and its replay compares heat to within 0.001 because a recording can't show each side's value.
+- `data remove` on a machine's slot does nothing, because loading leaves slots that aren't named as they are. Setting an amount works.
 - A machine placed with `setblock` has every side set to `NONE` and takes nothing. The trace sets its side config, items and energy in the `setblock`. Whether a player's placement differs is unchecked.
 
 ## Testing

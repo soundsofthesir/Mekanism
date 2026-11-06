@@ -1,6 +1,18 @@
 # Port
 
-`make_resource_jar.py`, `patch_worldgen.py` and `test_phase1.py` carry Mekanism's static content over; each file's top comment shows how to run it.
+## Carry the content over
+
+```sh
+python3 port/make_resource_jar.py upstream port/.work/mekanism-10.8.0-resources.jar
+horizon-port-pack check port/.work/mekanism-10.8.0-resources.jar port/.work/check
+python3 port/patch_worldgen.py port/.work/check/carry
+python3 port/add_common_tags.py port/.work/neoforge-26.3.0.100-universal.jar port/.work/check/carry
+python3 port/test_phase1.py port/.work/check/carry
+```
+
+The NeoForge jar comes from the Java server's install, described in `java_server.py`.
+
+## Machine mod
 
 `machine/` is a native mod. `machine/engine/` holds the machine logic with no game types, and `port/test_engine.sh` runs its tests. The `.rs` files beside it compile inside the game.
 

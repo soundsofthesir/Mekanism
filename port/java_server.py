@@ -30,7 +30,9 @@ RCON_PORT = 25575
 LOCAL_PORT = 25576
 PASSWORD_FILE = Path(__file__).resolve().parent / ".work/rcon-password"
 START_TIMEOUT_SECONDS = 300
-STEP_TIMEOUT_SECONDS = 5
+STEP_TIMEOUT_SECONDS = 180
+# A save to Tower's array disks once held up a tick for 52 seconds.
+RCON_TIMEOUT_SECONDS = 180
 RCON_LOGIN = 3
 RCON_COMMAND = 2
 
@@ -46,7 +48,7 @@ def ssh(script: str) -> str:
 
 class Rcon:
     def __init__(self, port: int, password: str) -> None:
-        self.socket = socket.create_connection(("127.0.0.1", port), timeout=30)
+        self.socket = socket.create_connection(("127.0.0.1", port), timeout=RCON_TIMEOUT_SECONDS)
         self.next_id = 1
         if self._send(RCON_LOGIN, password) is None:
             raise SystemExit("RCON refused the password")
