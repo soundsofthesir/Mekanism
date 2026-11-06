@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phase 0 passed on 2026-11-06. Phase 1 is in progress.
+Status: Phases 0 and 1 passed on 2026-11-06. Phase 2 is next.
 
 ## Source and target
 
@@ -38,6 +38,30 @@ Status: Phase 0 passed on 2026-11-06. Phase 1 is in progress.
 - A first build took 4 min 32 s on this 8GB Mac.
 
 The test reads the count with the game running, so it can't catch the loss of a few ticks at the save. It covers one saved number in a force-loaded chunk. It doesn't cover items, menus, client sync, or a player next to the block. Phase 2's NBT comparison has to cover those.
+
+## Phase 1 result
+
+`port/test_phase1.py` passed 3 of 3 runs on the unmodded Nightly `f319701`, in single player only:
+
+- All five ores generate. A scan of 144 chunks below y 64 found about 6,970 osmium, 12,510 tin, 6,380 lead, 5,780 uranium and 7,170 fluorite.
+- Blocks place and survive a reload. Osmium ore's loot table gives raw osmium.
+- Shaped (with a `c:` tag) and shapeless recipes craft at a table, and a furnace smelts raw osmium. That is 3 crafting recipes and 1 smelting recipe of the 225 vanilla-type recipes.
+- A screenshot shows the blocks and items with their real textures.
+
+There is no compiled jar: 26.3 has no published release, so `port/make_resource_jar.py` zips the source's assets and generated data.
+
+`port/patch_worldgen.py` is needed after the carry, for two reasons:
+
+- Mekanism's ore and salt files use Java types that read its config, so Horizon skipped all 11. The script writes the default values into vanilla's types and removes retrogen.
+- Horizon reads a mod's features only from `worldgen/configured_feature/`, but 26.3 datagen writes `worldgen/feature/`. `origin/main` had the same gap on 2026-11-06.
+
+Known gaps:
+
+- 76 machine blocks and their 76 recipes are left out, and 1,718 recipes of Mekanism's own types do nothing. Phases 3 and 4 add them.
+- The other 124 blocks use guessed vanilla templates (87 copy stone, 36 copy a carved pumpkin), so hardness, tool, sounds and shapes are unchecked against Java.
+- The 5 energy cubes have no model, and `cardboard_box` and `configurator` have no item definition.
+- Ore counts aren't compared with Java, and they differ by a few blocks between runs of one seed (tin 12,509-12,517, uranium constant). The cause is unknown.
+- Salt and dedicated servers are untested.
 
 ## Testing
 
