@@ -16,6 +16,14 @@ const LAVA_BOOST: i32 = 7;
 const MAX_PRODUCTION: i64 = 7 * 7 + 10 + 100;
 /// `GeneratorsStorageConfig.heatGenerator`: 12 times 20 ticks a second.
 pub const ENERGY_CAPACITY: i64 = 240;
+/// `HeatAPI.EPSILON`, which is Minecraft's `Constants.EPSILON`, a float widened to a double.
+const HEAT_EPSILON: f64 = 1.0e-6_f32 as f64;
+/// `heatTankCapacity`.
+const LAVA_CAPACITY: i64 = 1000;
+/// `FluidType.BUCKET_VOLUME`.
+const BUCKET_LAVA: i64 = 1000;
+/// A lava bucket's `COOKING_FUEL` burn time in vanilla, the divisor in `TileEntityHeatGenerator`.
+const LAVA_BUCKET_BURN_TIME: i64 = 20_000;
 /// `Direction.DOWN`: `TileEntityHeatGenerator` has no insulation on its bottom.
 const DOWN: usize = 0;
 
@@ -28,6 +36,36 @@ pub struct HeatGenerator {
     pub active: bool,
 }
 
+/// What an item in the fuel slot is worth.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FuelItem {
+    /// Its burn time in a furnace, in ticks.
+    pub burn_time: i64,
+    /// What one item leaves behind: a lava bucket's bucket.
+    pub remainder: Option<String>,
+}
+
+/// The fuel slot's contents and what they are worth.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FuelSlot {
+    pub item: String,
+    pub count: u32,
+    pub value: FuelItem,
+}
+
+impl FuelSlot {
+    /// `FluidFuelInventorySlot.fillOrBurn`: one item's lava goes in if all of it fits. A lava
+    /// bucket's thousand millibuckets go the same way. Answers the lava added.
+    fn burn_into(&mut self, room: i64) -> i64 {
+        let lava = BUCKET_LAVA * self.value.burn_time / LAVA_BUCKET_BURN_TIME;
+        if lava <= 0 || lava > room {
+            return 0;
+        }
+        self.count -= 1;
+        lava
+    }
+}
+
 /// What the generator's surroundings give it this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surroundings {
@@ -38,6 +76,19 @@ pub struct Surroundings {
 }
 
 impl HeatGenerator {
+    /// `fillOrBurn` for the fuel slot: it runs before the generator burns any lava this tick.
+    /// The slot comes back as it should now be, and empty when used up.
+    pub fn take_fuel(&mut self, slot: Option<FuelSlot>) -> Option<(String, u32)> {
+        let mut slot = slot?;
+        let room = LAVA_CAPACITY - self.lava;
+        let added = if room > 0 { slot.burn_into(room) } else { 0 };
+        self.lava += added;
+        if slot.count > 0 {
+            return Some((slot.item, slot.count));
+        }
+        slot.value.remainder.map(|item| (item, 1))
+    }
+
     /// `ambient_here` is the block's own temperature, where each side has its own in `surroundings`.
     pub fn tick(&mut self, surroundings: &Surroundings, ambient_here: f64) {
         self.add_heat(f64::from(LAVA_BOOST * surroundings.lava_sides));
@@ -54,9 +105,12 @@ impl HeatGenerator {
         self.heat / HEAT_CAPACITY
     }
 
-    /// `BasicHeatCapacitor.handleHeat`: heat never goes below zero.
+    /// `BasicHeatCapacitor.handleHeat`: a transfer no bigger than `HeatAPI.EPSILON` does nothing, and
+    /// heat never goes below zero.
     fn add_heat(&mut self, amount: f64) {
-        self.heat = (self.heat + amount).max(0.0);
+        if amount.abs() > HEAT_EPSILON {
+            self.heat = (self.heat + amount).max(0.0);
+        }
     }
 
     fn heat_to_energy(&mut self, ambient: f64) {
@@ -106,6 +160,16 @@ mod tests {
     }
 
     #[test]
+    fn a_transfer_no_bigger_than_epsilon_does_nothing() {
+        let mut g = generator(0, 0);
+        let before = g.heat;
+        g.add_heat(HEAT_EPSILON);
+        assert_eq!(g.heat, before);
+        g.add_heat(HEAT_EPSILON * 2.0);
+        assert!(g.heat > before);
+    }
+
+    #[test]
     fn a_full_generator_burns_no_lava() {
         let mut g = generator(ENERGY_CAPACITY, 1000);
         tick(&mut g);
@@ -125,6 +189,104 @@ mod tests {
         let mut g = generator(0, LAVA_PER_TICK - 1);
         tick(&mut g);
         assert_eq!((g.lava, g.active), (LAVA_PER_TICK - 1, false));
+    }
+}
+
+#[cfg(test)]
+mod fuel_reference {
+    use super::*;
+
+    const AMBIENT: f64 = 296.875;
+    const HEAT_TOLERANCE: f64 = 0.001;
+
+    /// Vanilla's burn times, from its item data.
+    fn value(item: &str) -> FuelItem {
+        match item {
+            "minecraft:coal" => FuelItem {
+                burn_time: 1600,
+                remainder: None,
+            },
+            "minecraft:blaze_rod" => FuelItem {
+                burn_time: 2400,
+                remainder: None,
+            },
+            "minecraft:lava_bucket" => FuelItem {
+                burn_time: 20_000,
+                remainder: Some("minecraft:bucket".to_owned()),
+            },
+            _ => FuelItem::default(),
+        }
+    }
+
+    fn replay(recording: &str, lava: i64, item: &str, count: u32) {
+        let surroundings = Surroundings {
+            ambient: [AMBIENT; 6],
+            lava_sides: 0,
+        };
+        let mut generator = HeatGenerator {
+            heat: AMBIENT * 10.0,
+            energy: 0,
+            lava,
+            active: false,
+        };
+        let mut slot = Some((item.to_owned(), count));
+        for line in recording.lines().skip(1) {
+            let fields: Vec<&str> = line.split('\t').collect();
+            slot = generator.take_fuel(slot.map(|(item, count)| FuelSlot {
+                value: value(&item),
+                item,
+                count,
+            }));
+            generator.tick(&surroundings, AMBIENT);
+            let heat: f64 = fields[1].parse().unwrap();
+            assert!(
+                (generator.heat - heat).abs() < HEAT_TOLERANCE,
+                "tick {}: heat {} against {heat}",
+                fields[0],
+                generator.heat
+            );
+            let shown = slot
+                .as_ref()
+                .map_or("-".to_owned(), |(item, count)| format!("{item}x{count}"));
+            let got = (generator.energy, generator.lava, generator.active, shown);
+            let expected = (
+                fields[2].parse().unwrap(),
+                fields[3].parse().unwrap(),
+                fields[4] == "1",
+                fields[5].to_owned(),
+            );
+            assert_eq!(got, expected, "tick {}", fields[0]);
+        }
+    }
+
+    #[test]
+    fn coal() {
+        let recording = include_str!("../../../reference/generator_fuel_coal.tsv");
+        replay(recording, 0, "minecraft:coal", 64);
+    }
+
+    #[test]
+    fn a_lava_bucket() {
+        let recording = include_str!("../../../reference/generator_fuel_bucket.tsv");
+        replay(recording, 0, "minecraft:lava_bucket", 1);
+    }
+
+    #[test]
+    fn a_lava_bucket_waits_until_it_all_fits() {
+        let recording = include_str!("../../../reference/generator_fuel_bucket_no_room.tsv");
+        replay(recording, 500, "minecraft:lava_bucket", 1);
+    }
+
+    #[test]
+    fn the_last_blaze_rod_empties_the_slot() {
+        let recording = include_str!("../../../reference/generator_fuel_blaze_rod.tsv");
+        replay(recording, 0, "minecraft:blaze_rod", 2);
+    }
+
+    #[test]
+    fn something_that_does_not_burn_stays() {
+        let recording = include_str!("../../../reference/generator_fuel_not_fuel.tsv");
+        replay(recording, 0, "minecraft:stone", 3);
     }
 }
 

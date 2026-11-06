@@ -20,7 +20,7 @@ fn mekmachine_blocks(blocks: &mut Vec<horizon_mods::content::Block>) {
     }
     blocks.push(horizon_mods::content::Block {
         id: "mekanismgenerators:heat_generator".into(),
-        template: "minecraft:carved_pumpkin".into(),
+        template: "minecraft:furnace".into(),
         state_properties: [("active".to_owned(), horizon_mods::content::StateProperty::Boolean)]
             .into_iter()
             .collect(),

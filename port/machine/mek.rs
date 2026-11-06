@@ -78,6 +78,12 @@ pub(crate) const DATA_ENERGY: usize = 2;
 pub(crate) const DATA_CAPACITY: usize = 3;
 pub(crate) const DATA_ITEM_SIDES: usize = 4;
 pub(crate) const DATA_ENERGY_SIDES: usize = 5;
+/// The data slots of the generator's menu.
+pub(crate) const GENERATOR_DATA_LAVA: usize = 0;
+pub(crate) const GENERATOR_DATA_ENERGY: usize = 1;
+pub(crate) const GENERATOR_DATA_TEMPERATURE: usize = 2;
+/// `RelativeSide.RIGHT`'s index in a saved side config.
+pub(crate) const RIGHT_INDEX: usize = 2;
 /// Menu buttons: 0 to 5 change an item side, 6 to 11 an energy side, by saved index.
 pub(crate) const BUTTONS_PER_ROW: i32 = 6;
 
@@ -229,6 +235,19 @@ impl Game<'_> {
             block,
             "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter"
         )
+    }
+
+    /// What an item is worth in the Heat Generator's fuel slot.
+    pub(crate) fn mek_fuel_value(&self, item: &str) -> mekmachine_engine::heat_generator::FuelItem {
+        let items = match &self.world_tables {
+            Some(tables) => &tables.items,
+            None => self.res.items(),
+        };
+        let stack = horizon_client::items::ItemStack::new(item, 1);
+        mekmachine_engine::heat_generator::FuelItem {
+            burn_time: i64::from(self.res.providers().burn_time(items, &stack, false)),
+            remainder: items.get(item).and_then(|info| info.crafting_remainder.clone()),
+        }
     }
 
     /// `TileEntityRecipeMachine.containsRecipe`.

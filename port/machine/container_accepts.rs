@@ -11,6 +11,14 @@ fn mekmachine_container_accepts(
 ) {
     use crate::game::mek;
     const INPUT: usize = 0;
+    if entity.id == mek::GENERATOR {
+        // `FluidFuelInventorySlot`: only what burns. Its right side is the energy slot's.
+        let right = face.is_some_and(|face| mek::relative_index(game.mek_facing(pos), face) == mek::RIGHT_INDEX);
+        if right || game.mek_fuel_value(&stack.item).burn_time <= 0 {
+            *cancel = true;
+        }
+        return;
+    }
     if !crate::game::Game::mek_is_machine(&entity.id) {
         return;
     }

@@ -6,7 +6,8 @@ fn mekmachine_power(
 ) {
     use crate::game::mek;
     use horizon_world::nbt::{Compound, JavaString, Tag};
-    use mekmachine_engine::heat_generator::{ENERGY_CAPACITY, HeatGenerator, Surroundings};
+    use horizon_client::items::ItemStack;
+    use mekmachine_engine::heat_generator::{ENERGY_CAPACITY, FuelSlot, HeatGenerator, Surroundings};
 
     fn read_lava(nbt: &Compound) -> i64 {
         let Some(Tag::List(list)) = nbt.get(&JavaString::from("fluids")) else {
@@ -79,9 +80,33 @@ fn mekmachine_power(
                 lava: read_lava(&entity.nbt),
                 active: was_active,
             };
+            const FUEL: usize = 0;
+            let slot = entity.items.get(FUEL).and_then(|stack| stack.as_ref()).map(|stack| FuelSlot {
+                item: stack.item.to_string(),
+                count: stack.count as u32,
+                value: game.mek_fuel_value(&stack.item),
+            });
+            let had_fuel = slot.clone();
+            let left = generator.take_fuel(slot);
             generator.tick(&Surroundings { ambient, lava_sides }, here);
             debug_assert!(generator.energy <= ENERGY_CAPACITY);
-            let nbt = &mut entity.nbt;
+            let fields = &mut **entity;
+            fields.items.resize(1, None);
+            match (&left, &had_fuel) {
+                (Some((item, count)), Some(old)) if *item == old.item => {
+                    if let Some(stack) = fields.items[FUEL].as_mut() {
+                        stack.count = *count as _;
+                    }
+                }
+                (Some((item, count)), _) => fields.items[FUEL] = Some(ItemStack::new(item, *count)),
+                (None, _) => fields.items[FUEL] = None,
+            }
+            let mut data = vec![0; 3];
+            data[mek::GENERATOR_DATA_LAVA] = generator.lava as i32;
+            data[mek::GENERATOR_DATA_ENERGY] = generator.energy as i32;
+            data[mek::GENERATOR_DATA_TEMPERATURE] = (generator.heat / 10.0) as i32;
+            fields.data = data;
+            let nbt = &mut fields.nbt;
             nbt.insert(JavaString::from("heat"), Tag::Double(generator.heat.to_bits()));
             nbt.insert(JavaString::from("energy"), Tag::Int(generator.energy as i32));
             nbt.insert(JavaString::from("active_state"), Tag::Int(i32::from(generator.active)));

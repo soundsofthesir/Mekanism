@@ -13,6 +13,17 @@ fn mekmachine_container(block: &str, container: &mut Option<horizon_client::cont
         });
         return;
     }
+    if block == crate::game::mek::GENERATOR {
+        const FUEL: usize = 0;
+        *container = Some(horizon_client::containers::ModContainer {
+            slots: 1,
+            faces: std::array::from_fn(|_| vec![FUEL]),
+            inputs: vec![FUEL],
+            outputs: vec![],
+            menu: Some(block.to_owned()),
+        });
+        return;
+    }
     if block != "mekmachine:furnace" {
         return;
     }

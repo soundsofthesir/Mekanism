@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phases 0, 1 and 2 passed on 2026-11-06. Phase 3 is in progress: the Enrichment Chamber, Crusher and Energized Smelter match the real mod's recordings in Horizon, in single player. The Heat Generator and one cable with one target match in the engine only. Menus, side config, cable networks and the full chain are left.
+Status: Phases 0, 1 and 2 passed on 2026-11-06. Phase 3 is in progress: the done-when chain matches the real mod in single player. Dedicated server runs are being finished.
 
 ## Source and target
 
@@ -91,7 +91,11 @@ Builds on this 8GB Mac: 4 min 32 s for the first and 2 min 7 s for a mod change,
 
 `port/test_phase3.py` replays 10 recordings of the real mod in Horizon with the same `tick step` method: 1,270 ticks and no differences. It compares progress, activity, energy and both slots.
 
-`port/add_common_tags.py` is needed after the carry. Mekanism's recipes name `c:` tags that NeoForge's jar provides, and 131 of the 198 they use were missing. Without them, recipes with those ingredients find nothing, which Phase 1's 4-recipe sample didn't catch.
+`port/test_chain.py` replays cable networks, the Heat Generator and the whole chain. A generator and a cube power a chamber and a smelter through four cables and a hopper, turning 2 ore into 4 ingots. Power runs out, the world restarts, and a command adds energy, so the 900 rows after the restart prove what was saved. All 1,704 rows match in single player. Energy, lava, slots, progress and activity match exactly, and heat to within 0.000001.
+
+`port/test_menu.py` plays as a player: a shift-click fills a machine, side buttons change its saved sides, and a hopper follows them. `port/test_generator.py` replays the fuel slot.
+
+`port/add_common_tags.py` is needed after the carry. Mekanism's recipes name `c:` tags that NeoForge's jar provides, and 131 of the 198 they use were missing. Without them, recipes with those ingredients find nothing, which Phase 1's 4-recipe sample didn't catch. `port/add_machine_content.py` adds the menu types and replaces the cable's and cube's models.
 
 ## Java reference
 

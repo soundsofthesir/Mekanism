@@ -143,7 +143,10 @@ fn send_remaining(
         if info.amount_to_split <= 0 {
             return;
         }
-        let accepted = info.amount_to_split.min(rooms[*index] - sent[*index]).max(0);
+        let accepted = info
+            .amount_to_split
+            .min(rooms[*index] - sent[*index])
+            .max(0);
         info.send(accepted, false);
         sent[*index] += accepted;
     }
@@ -178,7 +181,10 @@ mod tests {
 
     #[test]
     fn a_target_wanting_less_leaves_the_rest_to_the_others() {
-        assert_eq!(split(4000, &[20, 1000000, 1000000, 20]), vec![20, 1980, 1980, 20]);
+        assert_eq!(
+            split(4000, &[20, 1000000, 1000000, 20]),
+            vec![20, 1980, 1980, 20]
+        );
     }
 
     #[test]
@@ -192,11 +198,23 @@ mod tests {
     #[test]
     fn nothing_is_lost_or_invented() {
         for amount in [1, 7, 99, 1000, 4000] {
-            for rooms in [vec![3, 500, 8], vec![1, 1, 1, 1], vec![1000, 0, 2], vec![10, 20, 30, 40, 50]] {
+            for rooms in [
+                vec![3, 500, 8],
+                vec![1, 1, 1, 1],
+                vec![1000, 0, 2],
+                vec![10, 20, 30, 40, 50],
+            ] {
                 let sent = split(amount, &rooms);
                 let total: i64 = sent.iter().sum();
-                assert_eq!(total, amount.min(rooms.iter().sum()), "{amount} into {rooms:?}: {sent:?}");
-                assert!(sent.iter().zip(&rooms).all(|(s, r)| s <= r), "{sent:?} over {rooms:?}");
+                assert_eq!(
+                    total,
+                    amount.min(rooms.iter().sum()),
+                    "{amount} into {rooms:?}: {sent:?}"
+                );
+                assert!(
+                    sent.iter().zip(&rooms).all(|(s, r)| s <= r),
+                    "{sent:?} over {rooms:?}"
+                );
             }
         }
     }

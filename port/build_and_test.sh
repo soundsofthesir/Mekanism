@@ -22,8 +22,9 @@ if ! /Applications/Horizon.app/Contents/MacOS/horizon-launcher native-build port
     exit 1
 fi
 if [ "${3:-}" = "--only" ]; then
-    { echo "== machines"; python3 port/test_phase3.py --engine "$ENGINE"
-      echo "== menu"; python3 port/test_menu.py --engine "$ENGINE" --screenshot port/.work/menu.png; } 2>&1 | tee "$RESULTS"
+    { echo "== generator"; python3 port/test_generator.py --engine "$ENGINE" --screenshot port/.work/generator.png
+      echo "== menu"; python3 port/test_menu.py --engine "$ENGINE" --screenshot port/.work/menu.png
+      echo "== machines, dedicated"; python3 port/test_phase3.py --engine "$ENGINE" --dedicated --eula; } 2>&1 | tee "$RESULTS"
     exit
 fi
 {
@@ -34,6 +35,7 @@ fi
     echo "== machines against the real mod, single player"; python3 port/test_phase3.py --engine "$ENGINE"
     echo "== machines against the real mod, dedicated"; python3 port/test_phase3.py --engine "$ENGINE" --dedicated --eula
     echo "== a player's use of a machine"; python3 port/test_menu.py --engine "$ENGINE" --screenshot port/.work/menu.png
+    echo "== the generator's fuel and menu"; python3 port/test_generator.py --engine "$ENGINE" --screenshot port/.work/generator.png
     echo "== cable networks and the chain, single player"; python3 port/test_chain.py --engine "$ENGINE"
     echo "== cable networks and the chain, dedicated"; python3 port/test_chain.py --engine "$ENGINE" --dedicated --eula
 } 2>&1 | tee "$RESULTS"

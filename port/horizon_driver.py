@@ -95,6 +95,8 @@ class DedicatedServer:
             "--no-whitelist", "--offline", "--yes",
         )
         self.server("config", "set", f"engine.path={engine}", f"engine.resources={RESOURCES}")
+        # A server with no players stops ticking after 60 seconds by default, as vanilla's does.
+        (self.dir / "server.properties").write_text("pause-when-empty-seconds=-1\n")
 
     def server(self, *args: object) -> str:
         return run([NIGHTLY / "horizon-server", "--dir", self.dir, *args], self.env)

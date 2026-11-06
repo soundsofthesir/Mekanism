@@ -3,5 +3,5 @@ pub mod energy_network;
 pub mod furnace;
 pub mod heat_generator;
 pub mod recipe_machine;
-pub mod transfer;
 pub mod split;
+pub mod transfer;
