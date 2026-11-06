@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phases 0 to 3 passed on 2026-11-06. Phases 4 to 7 are undecided, and their estimates should use Phase 3's measured sizes.
+Status: Phases 0 to 3 passed on 2026-11-06. Phases 4 to 7 are undecided, and the estimate below uses what Phases 0 to 3 measured.
 
 ## Source and target
 
@@ -141,36 +141,67 @@ Each machine is compared against the Java mod in a fixture world: output, energy
 
 ## Estimate
 
-These figures are modelled, not measured, and could be off by a factor of 2 to 3.
+Re-estimated on 2026-11-06 from Phases 0 to 3. Phases 4 to 7 are still a model and could be off by a factor of 2 to 3, because the measurements come from the simplest machines.
 
-| Phase | Rust lines | Agent-hours | Total tokens |
+### Measured for Phases 0 to 3
+
+| Measure | First estimate | Measured |
+|---|---|---|
+| Non-test Rust | 14-23k lines | 2,085 lines, plus 3,104 lines of test scripts and 25 recordings |
+| Time | 43-110 agent-hours | 6.1 hours elapsed, 12:08 to 18:13 |
+| Total tokens | 70-250M | 164M, 97% of it cache reads and 438k of it output |
+| Turns | About 40 per 1,000 lines | 281, or 135 per 1,000 lines |
+| Context per turn | 80k | About 430k in the main session and 860k in the worker |
+
+The token count is in range only because each turn read far more context than assumed. The worker was forked from the main session and inherited its context, so fresh agents with a narrow brief should cost less per turn. That saving is not measured.
+
+The Rust count is low for two reasons: Horizon's hooks do much of the work, and many features are not ported yet (see Phase 3's known differences). Lines per Java line can't be measured fairly from this slice.
+
+### Phases 4 to 7
+
+| Phase | Rust lines | Agent-hours | Turns | Total tokens |
+|---|---|---|---|---|
+| 4: Cables, chemicals, machines | 10-25k | 20-60 | 750-1,800 | 110-730M |
+| 5: Multiblocks | 3-7k | 5-15 | 170-420 | 25-170M |
+| 6: Miner, logistics, MekaSuit | 7-20k | 17-55 | 630-1,500 | 95-600M |
+| 7: Generators, Additions, Tools | 3-7k | 6-18 | 210-510 | 30-200M |
+| **Total** | **23-59k** | **48-148** | **1,760-4,230** | **0.26-1.7B** |
+
+Test scripts would add about 1.5 lines per Rust line, the measured ratio. Output would be about 3-7M tokens, at the measured 1,560 per turn.
+
+The first estimate for these phases was 122-153k lines, 240-540 agent-hours and 0.35-1.3B tokens.
+
+Three parallel agents are not assumed, because this Mac has 8GB of memory and about 7GB of free disk. Run one at a time, the port takes 6 to 19 working days at 8 hours a day, before usage limits and review time.
+
+### How the model works
+
+Each phase is counted in units of work, using the Java sizes in `upstream/`:
+
+| Unit | Turns | Hours | Rust lines | Basis |
+|---|---|---|---|---|
+| Hard: a new system with its own engine, recordings and tests | 20-40 | 0.6-1.5 | 300-800 | The worker built about 4 in 94 turns and 2.6 hours |
+| Medium: a recipe family, special machine or module | 8-15 | 0.2-0.5 | 100-300 | Judgement |
+| Simple: a tier or variant on an existing engine | 2-4 | 0.05-0.1 | 5-20 | Judgement, from the Crusher and Smelter sharing the Chamber's engine |
+
+| Phase | Hard | Medium | Simple |
 |---|---|---|---|
-| 0: Feasibility test | 1k | 5-15 | 5-20M |
-| 1: Static content | 2k | 5-15 | 10-30M |
-| 2: Machine layer | 3-8k | 8-30 | 15-80M |
-| 3: Working chain | 8-12k | 25-50 | 40-120M |
-| 4: Cables, chemicals, machines | 60-70k | 110-240 | 170-600M |
-| 5: Multiblocks | 12-18k | 30-70 | 40-150M |
-| 6: Miner, logistics, MekaSuit | 35-45k | 70-160 | 100-400M |
-| 7: Generators, Additions, Tools | 15-20k | 30-70 | 40-150M |
-| **Total** | **135-175k** | **285-650** | **0.45-1.5B** |
-| **Phases 0-3 only** | **14-23k** | **43-110** | **70-250M** |
+| 4 | 14 | 24 | 75 |
+| 5 | 7 | 0 | 0 |
+| 6 | 11 | 38 | 0 |
+| 7 | 4 | 12 | 0 |
 
-With three parallel agents from Phase 4, the whole port takes 140 to 325 hours of elapsed time. At about 8 hours a day that is 4 to 8 weeks, before usage limits and review time.
+- Phase 4's hard units are chemicals, pipes, tubes, conductors, upgrades, redstone and security, full side config, item energy slots, factories, rendering, sounds and particles, radiation, and 2 for the GUI library (13.7k Java lines).
+- Phase 6's hard units are the Digital Miner, teleporter, logistical transport, Robit, 3 for QIO and 4 for the MekaSuit and its base. Its 32 modules are medium units.
+- Hours and turns are multiplied by 1.2 to 1.5 for integration and hook failures. This multiplier is a judgement.
+- Tokens use 150k to 400k of context per turn. The high end is close to the main session's measured rate. The low end assumes fresh agents and is unmeasured.
+- Phase 4's GUI line count is the least certain. Two hard units at the usual size may be too few for 13.7k Java lines.
 
-About 6-20M of the tokens would be output. The rest is input, roughly 90% of it cache reads.
+### Unknowns that could break this model
 
-Assumptions:
-
-- Rust comes to about 70-90% of the 209k Java lines, including the machine layer.
-- Phase 2 is now an adapter over Horizon's hooks, 3-8k lines instead of 15-25k, at the same hours and tokens per line. This is a judgement, not a measurement. Later phases keep their old figures, though the hooks may reduce them too.
-- Each finished line takes about 3 written lines, at about 12 tokens a line.
-- Each 1,000 finished lines take about 3M input tokens: around 40 turns at 80k of context.
-- A verified, tested port produces about 250-500 finished lines per agent-hour.
-- Three parallel agents do the work of about 2.5.
-
-The biggest unknowns are incremental build times, how far the untested hooks hold up, and the work to build the Java comparison tests. After Phase 3, replace these assumptions with the measured tokens per line and lines per hour, then re-estimate Phases 4 to 7.
+- Test time: about 50 minutes passed between the final build and the final results for the current 10 test groups, and that grows with each machine. The suite will need splitting.
+- Rendering and custom block models: nothing so far has used Mekanism's own renderers.
+- Hooks: the chemical, multiblock and entity work may need hooks that don't exist, and the fallback is a Horizon fork.
 
 ## Scope
 
-Phases 0 to 3, decided on 2026-11-06, are done. Deciding on Phases 4 to 7 comes next, with the assumptions above replaced by measured rates.
+Phases 0 to 3, decided on 2026-11-06, are done. Deciding on Phases 4 to 7 comes next.
