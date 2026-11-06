@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phases 0 to 3 passed on 2026-11-06. Phases 4 to 7 are undecided, and the estimate below uses what Phases 0 to 3 measured.
+Status: Phases 0 to 3 passed on 2026-11-06. Phase 4's calibration slice is done (see "Phase 4 result"), and the rest of Phases 4 to 7 waits for its review. The estimate below uses what Phases 0 to 3 measured.
 
 ## Source and target
 
@@ -106,11 +106,82 @@ Known differences from the real mod:
 - Energy Cube: basic tier only, with no menu and no charge or discharge slots, so a player can't change its sides. Its transfer limit is per call, not per tick. Its model doesn't show side settings. Its energy doesn't stay in the item when broken (unverified against Java).
 - Universal Cable: basic tier only, with no connection modes or redstone control. A cable's model is a plain core and arms, not the real OBJ. Each cable's saved share is unverified, because the recordings compare the chain's cables by their sum. A network is searched afresh each tick, whose cost is unmeasured.
 - Heat Generator: no energy slot, no Nether bonus, no heat passed to a block below, and lava in its own block space isn't counted. A hopper can't pull out an empty bucket.
-- Screens are a plain layout, not Mekanism's art or tabs. Side buttons are coloured squares.
 - Not tested: a client on a dedicated server, other biomes or positions beyond the recorded ones, other recipes beyond iron ore, gold ore, cobblestone and raw iron in machines, and performance.
 - `port/machine` hooks one function outside the named catalog (`native_container_accepts`), so a Horizon update may break it.
+- Superseded by Phase 4: the plain layout and coloured squares on the electric machines' screens.
 
 Measured sizes: `port/machine` is about 2,000 lines of glue and engine code, plus tests. That covers 6 machines and the shared layer, well under the 8-12k and 3-8k estimated for Phases 3 and 2, because the hooks do much of the work. A build after a mod change took 1 to 2 minutes.
+
+## Phase 4 result
+
+This covers the calibration slice only: chemicals, one tube, one chemical machine, the real screen on the electric machines, one custom renderer and a split test suite.
+
+`port/run_tests.py` runs test groups one at a time and reports each one's time. `--changed` picks groups from the files that differ from a git ref, and a file with no rule selects every group. `--all` keeps the full set, which is the one to use before a merge. `port/build_and_test.sh` takes `--no-build` and the same arguments.
+
+The Chemical Oxidizer was the machine chosen because it has one item input and one chemical output, with no chemical input or fluid, so it tests a tank, ejecting and a recipe's chemical result and nothing else. It sends into a Pressurized Tube, and a basic Chemical Tank takes the result. It shares the recipe logic of the other machines through a generic `Machine<Output>`.
+
+- `port/java_reference_chemical.py` records 16 scenarios from the real mod. `port/test_chemical.py` replays them in single player and on a dedicated server, including a server restart with chemicals in tubes. All rows match: rates, shares, full and wrong-chemical targets, closed sides, and `recipes_used`.
+- Chemicals save as the real mod does: `chemical_tanks: [{container: 0b, stored: {amount: 100L, type: "..."}}]` and, on a tube, `stored: {amount: ..., type: "..."}`. A block's other values keep Horizon's container format (`Items`, `energy`).
+- `port/test_gui.py` compares a screenshot with Mekanism's art at the source's positions: slots, arrow, tabs and their tints, both bars. Clicks open the side config window, change sides (left, right, shift clears), change kind and toggle eject, and the window blocks the slots under it. `port/test_menu.py` plays through the same window.
+- `port/test_cable_look.py` measures a screenshot of the Universal Cable drawn from its OBJ model. A straight run's section is 0.378 of a block against the OBJ's 0.375. Energy contents appear and clear again without a block changing.
+
+What each check was proven to fail on, by building the broken value:
+
+| Broken | Failing test and message |
+|---|---|
+| Oxidizer ticks 100 to 99 | `test_chemical`: `oxidizer_normal tick 99` |
+| Tube capacity 4,000 to 3,000 | `test_chemical`: `tube_fills tick 7` |
+| `arrow/up` to `arrow/down` | `test_gui`: up arrow, 44 pixels |
+| Security tab's colour bytes swapped | `test_gui`: security tab's holder, 12 pixels |
+| Left click sends the right click's id | `test_gui`: top after a left click, got 0 |
+| Contents scale forced to 0 | `test_cable_look`: holding energy changes nothing |
+| Model's section shrunk to 0.67 | `test_cable_look`: section 0.273 |
+| Client sync of a cable's energy removed | `test_cable_look`: drained cable, 1,200 pixels |
+
+Horizon's hooks were enough for all of this, with no fork. Three findings matter for later work:
+
+- `screen_mouse_button_pressed_pre` plus `screen_render_post` gives real windows over slots. The named `screen_click` hook isn't called over a slot, so it can't.
+- `native_draw_quad` takes a rectangular UV and no alpha. Every transmitter face fits the rectangle. Alpha goes through `BlockEntityDraw::vertices_mut`, which is not in the named catalog, so a Horizon update may break it.
+- The GUI atlas holds `<ns>:gui/...` and block textures, but not `mek_liquid/`, so the energy texture is copied to `textures/block/port_energy.png` in the carry step. The other chemical and fluid textures will need the same.
+
+Known differences from the real mod:
+
+- Chemicals: basic tube and basic tank only. Only the oxidizer holds chemicals as a machine. No gas dumping, radiation, chemical item slots or `canEject` rules beyond the sides. A tube has no connection modes or redstone control.
+- Tube shares: the real mod's network order comes from a hash, so which tube gets a remainder isn't copied. `test_chemical` compares shares sorted within each row. Two real runs gave the same order, so it may be stable there, but its source says identity hash.
+- Tubes with different chemicals don't join, which matches `isValidTransmitter`, but no recording covers it or the merge when two networks meet.
+- Oxidizer: a plain screen with only the input slot, no chemical gauge, side config or energy slot. Its `active` state isn't shown on the block, whose carried model has none.
+- Chemical Tank: no screen, slots or dump mode. Its carried block is a carved pumpkin template with its real model name, and its real tank model's custom drawing isn't done.
+- Machine screen: there is no recording of the real screen, because that needs a Java client. Positions and art come from source. Tabs for upgrades, security, redstone, experience and transporter config are drawn but do nothing. The energy tab has no tooltip, and tooltips cover only side buttons, the power bar and the side tab. No warnings, recipe viewer, block icons on side buttons or window dragging and pinning. Item ejecting can be toggled but still does nothing. A press makes no click sound, since the hook is read only. Text is hard-coded English from `en_us.json` for the window. The energy slot is drawn but isn't in the menu.
+- The Heat Generator's screen is still the plain one, and the Energy Cube has none.
+- Universal Cable: base tier, normal and none connections only, with no glass or pull and push parts. Connections come from a tag list, not from checking that the neighbour's side takes energy. Contents show this cable's share, not the network's scale with its fade of 0.02 a tick. Alpha below 100% and the look on a dedicated server's client are unverified. The Pressurized Tube still uses the plain model.
+- `port/machine` adds `mek_send_menu_button` and `vertices_mut` use, both outside the named catalog.
+
+Not tested: a client on a dedicated server, and frame time with many cables.
+
+Full run on the slice, `--all` after a clean build: 13 of 14 runs passed in 58 minutes. The 14th, `menu`, stopped when the game crashed while opening its world, before any of the test's checks. It then passed 3 of 3 runs on the same build. The crash is a null pointer in Horizon's `lan_host`, under `ChunkEncoder::with_signs` (macOS report at 22:20). This session started the game at least 40 times and saw it once. Its cause is unknown and it may recur in any group.
+
+Group times, each mode: chain 1,025 s, chemical 325 s, machines 265 s, generator 83 s, furnace 55 s and 39 s, menu 40 s, cable look 33 s, GUI 24 s, transfer 17 s and 14 s. The chain's two modes are 58% of a full run. A row there takes about 0.6 s, because each read starts a `horizon-ctl` process, so a batched read would save the most time.
+
+### Cost against the model
+
+Turns are estimated from the session's transcript, not counted by a tool. Times are wall clock and overlap, because reading for one item ran during another's build, and they leave out test runs waiting in the background.
+
+| Item | Turns | Elapsed | Hand-written Rust | Plan's units | Per unit |
+|---|---|---|---|---|---|
+| Test split | 3 | under 5 min | 0 (190 lines of Python) | Not in the model | |
+| Chemicals, tube, oxidizer, tank | About 13 | 43 min | About 640 | 2 hard, 1 medium | About 5 turns, 15 min, 250 lines |
+| GUI core and side window | About 13 | About 35 min | About 660 | 1 of 2 hard | 13 turns, 35 min, 660 lines |
+| Cable renderer | About 8 | About 30 min | About 220, plus 205 generated | 1 hard, in part | 8 turns, 30 min, 220 lines |
+| Whole slice | About 45, plus 7 waiting | 1.3 h, then 1 h for the full run | About 1,520 | | |
+
+The model says a hard unit takes 20-40 turns, 0.6-1.5 hours and 300-800 lines. The slice came in under on turns and at or below the low end on hours, with lines in range. Scripts add about 1,000 lines of Python, or 0.65 per Rust line against the 1.5 measured before.
+
+Limits on reading this:
+
+- The GUI's two hard units look too few. This slice ported about ten element types of the 13.7k Java lines, and no gauge, scroll list, text field, or per-machine screen. Each machine's screen is a cost the model doesn't count, and it is unmeasured because the oxidizer's real screen wasn't done.
+- The renderer covers one model type with one hook. Fluid and chemical contents in tanks, and the MekaSuit's models, may cost more.
+- The chemical layer's cost benefits from copying the cable's shape, so the next system with no such shape may land higher.
+- Full-suite time isn't in the turn figures. At 1 hour and growing, it limits how often a merge can happen.
 
 ## Java reference
 
@@ -126,6 +197,7 @@ Measured sizes: `port/machine` is about 2,000 lines of glue and engine code, plu
 - A block's ambient temperature comes from its biome and height, and each side has its own. The Heat Generator's port needs this from Horizon, and its replay compares heat to within 0.001 because a recording can't show each side's value.
 - `data remove` on a machine's slot does nothing, because loading leaves slots that aren't named as they are. Setting an amount works.
 - A machine placed with `setblock` has every side set to `NONE` and takes nothing. The trace sets its side config, items and energy in the `setblock`. Whether a player's placement differs is unchecked.
+- `port/java_reference_chemical.py` records the oxidizer, tube and tank. A machine ejects before it makes anything in a tick, so a recipe's result leaves a tick later. config2 is the chemical side config. Tube shares appear in `data get` as `stored`, because a save asks the network for them.
 
 ## Testing
 

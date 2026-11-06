@@ -26,4 +26,13 @@ Read `machine/` first. Both flags are your decisions: `--trust-native-code` that
 sh port/build_and_test.sh --trust-native-code --eula
 ```
 
-It writes the build's output to `.work/build.txt` and the test results to `.work/results.txt`.
+It writes the build's output to `.work/build.txt` and the test results, with each group's time, to `.work/results.txt`. To run less:
+
+```sh
+sh port/build_and_test.sh --trust-native-code --eula --changed      # build, then the groups for the changed files
+sh port/build_and_test.sh --trust-native-code --eula --no-build gui menu
+python3 port/run_tests.py --list
+python3 port/run_tests.py --changed main --dry-run
+```
+
+Use `--all` before a merge. `python3 port/gen_transmitter_model.py upstream` regenerates `machine/engine/src/transmitter_model.rs` from Mekanism's OBJ models.
