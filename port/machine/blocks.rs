@@ -9,7 +9,8 @@ fn mekmachine_blocks(blocks: &mut Vec<horizon_mods::content::Block>) {
     for name in ["enrichment_chamber", "crusher", "energized_smelter"] {
         blocks.push(horizon_mods::content::Block {
             id: format!("mekanism:{name}"),
-            template: "minecraft:carved_pumpkin".into(),
+            // A furnace's template opens a menu and faces like one. Its `lit` goes unused.
+            template: "minecraft:furnace".into(),
             state_properties: [("active".to_owned(), horizon_mods::content::StateProperty::Boolean)]
                 .into_iter()
                 .collect(),
@@ -17,6 +18,15 @@ fn mekmachine_blocks(blocks: &mut Vec<horizon_mods::content::Block>) {
             ..Default::default()
         });
     }
+    blocks.push(horizon_mods::content::Block {
+        id: "mekanismgenerators:heat_generator".into(),
+        template: "minecraft:carved_pumpkin".into(),
+        state_properties: [("active".to_owned(), horizon_mods::content::StateProperty::Boolean)]
+            .into_iter()
+            .collect(),
+        item: true,
+        ..Default::default()
+    });
     for name in [
         "energy_gen",
         "energy_cell",

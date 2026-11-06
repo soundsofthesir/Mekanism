@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -54,6 +55,7 @@ class SinglePlayer:
         self.game_dir = folder / "game"
         self.game_dir.mkdir()
         self.world_dir = self.game_dir / "saves" / WORLD
+        self.content_dir = self.game_dir
         self.engine = engine
 
     def ctl(self, *args: object) -> dict:
@@ -87,6 +89,7 @@ class DedicatedServer:
         self.dir = folder / "server"
         self.dir.mkdir()
         self.world_dir = self.dir / WORLD
+        self.content_dir = self.dir
         self.server(
             "init", "--eula", "--world", WORLD, "--seed", SEED, "--port", PORT,
             "--no-whitelist", "--offline", "--yes",
@@ -104,6 +107,20 @@ class DedicatedServer:
 
     def command(self, line: str) -> list[str]:
         return self.server("cmd", *line.split()).splitlines()
+
+
+def install_content(game_dir: Path, mekanism: Path, generators: Path) -> None:
+    """Turns on the carried mods. The generators' copy of `mekanism:` files would clash with the
+    main mod's, so they are left out, and its manifest stops claiming that namespace."""
+    mods = game_dir / "horizon-mods"
+    mods.mkdir()
+    shutil.copytree(mekanism, mods / "mekanism")
+    target = mods / "mekanismgenerators"
+    shutil.copytree(generators, target, ignore=shutil.ignore_patterns("mekanism"))
+    manifest = target / "horizon-mod.toml"
+    lines = manifest.read_text().splitlines()
+    manifest.write_text("\n".join(line for line in lines if not line.startswith("namespaces")) + "\n")
+    (game_dir / "horizon-mods.txt").write_text("mod.mekanism:true\nmod.mekanismgenerators:true\n")
 
 
 def write_functions(world_dir: Path, functions: dict[str, list[str]]) -> None:

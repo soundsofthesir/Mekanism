@@ -15,7 +15,7 @@ const LAVA_BOOST: i32 = 7;
 /// `MAX_PRODUCTION`: `heatGenerationLava` for 7 sides, `heatGenerationNether` and `heatGeneration`.
 const MAX_PRODUCTION: i64 = 7 * 7 + 10 + 100;
 /// `GeneratorsStorageConfig.heatGenerator`: 12 times 20 ticks a second.
-const ENERGY_CAPACITY: i64 = 240;
+pub const ENERGY_CAPACITY: i64 = 240;
 /// `Direction.DOWN`: `TileEntityHeatGenerator` has no insulation on its bottom.
 const DOWN: usize = 0;
 

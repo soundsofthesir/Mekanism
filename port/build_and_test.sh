@@ -21,10 +21,19 @@ if ! /Applications/Horizon.app/Contents/MacOS/horizon-launcher native-build port
     tail -30 port/.work/build.txt | tee "$RESULTS"
     exit 1
 fi
+if [ "${3:-}" = "--only" ]; then
+    { echo "== machines"; python3 port/test_phase3.py --engine "$ENGINE"
+      echo "== menu"; python3 port/test_menu.py --engine "$ENGINE" --screenshot port/.work/menu.png; } 2>&1 | tee "$RESULTS"
+    exit
+fi
 {
     echo "== furnace, single player"; python3 port/test_phase2.py --engine "$ENGINE"
     echo "== furnace, dedicated"; python3 port/test_phase2.py --engine "$ENGINE" --dedicated --eula
     echo "== transfer, single player"; python3 port/test_transfer.py --engine "$ENGINE"
     echo "== transfer, dedicated"; python3 port/test_transfer.py --engine "$ENGINE" --dedicated --eula
-    echo "== machines against the real mod"; python3 port/test_phase3.py --engine "$ENGINE" --carry port/.work/check/carry
+    echo "== machines against the real mod, single player"; python3 port/test_phase3.py --engine "$ENGINE"
+    echo "== machines against the real mod, dedicated"; python3 port/test_phase3.py --engine "$ENGINE" --dedicated --eula
+    echo "== a player's use of a machine"; python3 port/test_menu.py --engine "$ENGINE" --screenshot port/.work/menu.png
+    echo "== cable networks and the chain, single player"; python3 port/test_chain.py --engine "$ENGINE"
+    echo "== cable networks and the chain, dedicated"; python3 port/test_chain.py --engine "$ENGINE" --dedicated --eula
 } 2>&1 | tee "$RESULTS"

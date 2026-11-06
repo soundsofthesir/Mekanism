@@ -126,6 +126,17 @@ fn mekmachine_machines(
     if let Some(recipe) = &machine.recipe {
         fields.nbt.insert(JavaString::from("recipe"), Tag::String(JavaString::from(recipe.as_str())));
     }
+    use crate::game::mek;
+    let item_sides = mek::pack_sides(&fields.nbt, mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE);
+    let energy_sides = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
+    let mut data = vec![0; 6];
+    data[mek::DATA_PROGRESS] = machine.progress;
+    data[mek::DATA_TICKS] = mekmachine_engine::recipe_machine::TICKS_REQUIRED;
+    data[mek::DATA_ENERGY] = machine.energy as i32;
+    data[mek::DATA_CAPACITY] = (usage * 4) as i32;
+    data[mek::DATA_ITEM_SIDES] = item_sides;
+    data[mek::DATA_ENERGY_SIDES] = energy_sides;
+    fields.data = data;
     if machine.active != was_active {
         const UPDATE_ALL: i32 = 3;
         let active = if machine.active { "true" } else { "false" };

@@ -23,6 +23,24 @@ fn mekmachine_energy(block: &str, energy: &mut Option<horizon_client::containers
         extract_faces: NONE,
     };
     match block {
+        crate::game::mek::CUBE => {
+            *energy = Some(ModEnergyBuffer {
+                capacity: crate::game::mek::CUBE_CAPACITY,
+                max_insert: crate::game::mek::CUBE_RATE,
+                max_extract: 0,
+                insert_faces: ALL,
+                extract_faces: NONE,
+            });
+        }
+        crate::game::mek::GENERATOR => {
+            *energy = Some(ModEnergyBuffer {
+                capacity: crate::game::mek::GENERATOR_CAPACITY,
+                max_insert: 0,
+                max_extract: 0,
+                insert_faces: NONE,
+                extract_faces: NONE,
+            });
+        }
         "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => *energy = Some(machine(5)),
         "mekanism:crusher" => *energy = Some(machine(8)),
         "mekmachine:energy_gen" => {

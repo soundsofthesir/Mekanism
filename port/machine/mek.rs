@@ -1,0 +1,453 @@
+// What Mekanism's blocks share in the game: side configuration, energy between blocks, and cable
+// networks. The rules that need no game types are in `mekmachine_engine`.
+use super::Game;
+use horizon_core::geometry::Direction;
+use horizon_world::nbt::{Compound, JavaString, Tag};
+use mekmachine_engine::split::split;
+use std::{cell::RefCell, collections::HashMap};
+
+pub(crate) const CUBE: &str = "mekanism:basic_energy_cube";
+pub(crate) const CABLE: &str = "mekanism:basic_universal_cable";
+pub(crate) const GENERATOR: &str = "mekanismgenerators:heat_generator";
+/// `EnergyCubeTier.BASIC`.
+pub(crate) const CUBE_CAPACITY: i32 = 4_000_000;
+pub(crate) const CUBE_RATE: i32 = 4_000;
+/// `CableTier.BASIC`: each cable adds this to its network's capacity.
+const CABLE_CAPACITY: i64 = 8_000;
+/// `GeneratorsStorageConfig.heatGenerator`.
+pub(crate) const GENERATOR_CAPACITY: i32 = 240;
+/// `heatTankCapacity`.
+pub(crate) const LAVA_TANK_CAPACITY: i32 = 1_000;
+/// `DataType` ordinals, as saved in `component_config`.
+pub(crate) const SIDE_INPUT: i32 = 1;
+pub(crate) const SIDE_OUTPUT: i32 = 4;
+pub(crate) const SIDE_ENERGY: i32 = 8;
+/// `LightConfigInfo.MACHINE`: right is the output, back the energy slot, the rest input.
+const MACHINE_ITEM_SIDES: [i32; 6] = [SIDE_INPUT, SIDE_INPUT, SIDE_OUTPUT, SIDE_ENERGY, SIDE_INPUT, SIDE_INPUT];
+/// `ItemBlockEnergyCube.SIDE_CONFIG`: `FRONT_OUT_EJECT` for energy, `FRONT_OUT_NO_EJECT` for items.
+const CUBE_ENERGY_SIDES: [i32; 6] = [SIDE_OUTPUT, SIDE_INPUT, SIDE_INPUT, SIDE_INPUT, SIDE_INPUT, SIDE_INPUT];
+const CUBE_ITEM_SIDES: [i32; 6] = CUBE_ENERGY_SIDES;
+/// `TransmissionType.ENERGY`'s index, in `config0` and `eject0`.
+pub(crate) const ENERGY_CONFIG: &str = "config0";
+/// `TransmissionType.ITEM`'s index.
+pub(crate) const ITEM_CONFIG: &str = "config3";
+/// `Direction` order, as `EnumUtils.DIRECTIONS`.
+pub(crate) const DIRECTIONS: [Direction; 6] = [
+    Direction::Down,
+    Direction::Up,
+    Direction::North,
+    Direction::South,
+    Direction::West,
+    Direction::East,
+];
+
+pub(crate) fn has_block_entity(block: &str) -> bool {
+    matches!(
+        block,
+        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter"
+    ) || block == CUBE
+        || block == CABLE
+        || block == GENERATOR
+}
+
+/// The side config a block's item gives it when placed (`AttachedSideConfig`). The real mod applies
+/// it only to a player's placement, so a bare `setblock` there has none and one here does.
+pub(crate) fn default_config(block: &str) -> Compound {
+    let (energy, items): ([i32; 6], [i32; 6]) = match block {
+        CUBE => (CUBE_ENERGY_SIDES, CUBE_ITEM_SIDES),
+        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" => {
+            ([SIDE_INPUT; 6], MACHINE_ITEM_SIDES)
+        }
+        _ => return Compound::new(),
+    };
+    let mut config = Compound::new();
+    config.insert(JavaString::from(ENERGY_CONFIG), Tag::IntArray(energy.to_vec()));
+    config.insert(JavaString::from(ITEM_CONFIG), Tag::IntArray(items.to_vec()));
+    if block == CUBE {
+        config.insert(JavaString::from("eject0"), Tag::Byte(1));
+    }
+    let mut nbt = Compound::new();
+    nbt.insert(JavaString::from("component_config"), Tag::Compound(config));
+    nbt
+}
+
+/// The data slots of a machine's menu.
+pub(crate) const DATA_PROGRESS: usize = 0;
+pub(crate) const DATA_TICKS: usize = 1;
+pub(crate) const DATA_ENERGY: usize = 2;
+pub(crate) const DATA_CAPACITY: usize = 3;
+pub(crate) const DATA_ITEM_SIDES: usize = 4;
+pub(crate) const DATA_ENERGY_SIDES: usize = 5;
+/// Menu buttons: 0 to 5 change an item side, 6 to 11 an energy side, by saved index.
+pub(crate) const BUTTONS_PER_ROW: i32 = 6;
+
+/// The values a side cycles through, in the order `SideConfig` offers them for one-slot machines.
+pub(crate) const ITEM_SIDE_CYCLE: [i32; 4] = [0, SIDE_INPUT, SIDE_OUTPUT, SIDE_ENERGY];
+pub(crate) const ENERGY_SIDE_CYCLE: [i32; 2] = [0, SIDE_INPUT];
+
+/// Screen layout, from `GuiElectricMachine`: the progress bar, the power bar.
+pub(crate) const PROGRESS_BAR: [f32; 4] = [86.0, 38.0, 25.0, 9.0];
+pub(crate) const POWER_BAR: [f32; 4] = [164.0, 16.0, 6.0, 52.0];
+pub(crate) const SIDE_BUTTON_SIZE: f32 = 7.0;
+const SIDE_BUTTON_LEFT: f32 = 8.0;
+const SIDE_BUTTON_TOP: f32 = 18.0;
+const SIDE_BUTTON_STEP: f32 = 8.0;
+
+/// Where a side's button sits, row 0 for items and row 1 for energy, in the screen's own pixels.
+pub(crate) fn side_button(row: usize, index: usize) -> [f32; 2] {
+    let column = index % 3;
+    let line = index / 3;
+    [
+        SIDE_BUTTON_LEFT + SIDE_BUTTON_STEP * column as f32,
+        SIDE_BUTTON_TOP + SIDE_BUTTON_STEP * (line + 3 * row) as f32,
+    ]
+}
+
+/// A side config packed into a data slot, 2 bits a side, as an index into its cycle.
+pub(crate) fn pack_sides(nbt: &Compound, config: &str, cycle: &[i32]) -> i32 {
+    (0..6).fold(0, |packed, index| {
+        let value = side_value(nbt, config, index);
+        let position = cycle.iter().position(|v| *v == value).unwrap_or(0) as i32;
+        packed | (position << (2 * index))
+    })
+}
+
+pub(crate) fn unpack_side(packed: i32, index: usize) -> usize {
+    ((packed >> (2 * index)) & 3) as usize
+}
+
+/// Moves one side of a saved config on to the next value of its cycle.
+pub(crate) fn cycle_side(nbt: &mut Compound, config: &str, index: usize, cycle: &[i32]) {
+    let key = JavaString::from("component_config");
+    let saved = nbt.entry(key).or_insert_with(|| Tag::Compound(Compound::new()));
+    let Tag::Compound(saved) = saved else {
+        return;
+    };
+    let sides = saved
+        .entry(JavaString::from(config))
+        .or_insert_with(|| Tag::IntArray(vec![0; 6]));
+    let Tag::IntArray(sides) = sides else {
+        return;
+    };
+    if let Some(side) = sides.get_mut(index) {
+        let position = cycle.iter().position(|v| v == side).unwrap_or(0);
+        *side = cycle[(position + 1) % cycle.len()];
+    }
+}
+
+pub(crate) fn offset(pos: [i32; 3], side: Direction) -> [i32; 3] {
+    let [dx, dy, dz] = match side {
+        Direction::Down => [0, -1, 0],
+        Direction::Up => [0, 1, 0],
+        Direction::North => [0, 0, -1],
+        Direction::South => [0, 0, 1],
+        Direction::West => [-1, 0, 0],
+        Direction::East => [1, 0, 0],
+    };
+    [pos[0] + dx, pos[1] + dy, pos[2] + dz]
+}
+
+pub(crate) fn opposite(side: Direction) -> Direction {
+    match side {
+        Direction::Down => Direction::Up,
+        Direction::Up => Direction::Down,
+        Direction::North => Direction::South,
+        Direction::South => Direction::North,
+        Direction::West => Direction::East,
+        Direction::East => Direction::West,
+    }
+}
+
+fn clockwise(side: Direction) -> Direction {
+    match side {
+        Direction::North => Direction::East,
+        Direction::East => Direction::South,
+        Direction::South => Direction::West,
+        Direction::West => Direction::North,
+        other => other,
+    }
+}
+
+fn facing_of(name: &str) -> Direction {
+    match name {
+        "south" => Direction::South,
+        "west" => Direction::West,
+        "east" => Direction::East,
+        "up" => Direction::Up,
+        "down" => Direction::Down,
+        _ => Direction::North,
+    }
+}
+
+/// `RelativeSide.fromDirections` for a block facing a side of the compass: its index in a saved
+/// side config, whose order is front, left, right, back, top, bottom.
+pub(crate) fn relative_index(facing: Direction, side: Direction) -> usize {
+    if side == facing {
+        0
+    } else if side == clockwise(facing) {
+        1
+    } else if side == opposite(clockwise(facing)) {
+        2
+    } else if side == opposite(facing) {
+        3
+    } else if side == Direction::Up {
+        4
+    } else {
+        5
+    }
+}
+
+pub(crate) fn energy_of(nbt: &Compound) -> i64 {
+    match nbt.get(&JavaString::from("energy")) {
+        Some(Tag::Int(value)) => i64::from(*value),
+        Some(Tag::Long(value)) => *value,
+        _ => 0,
+    }
+}
+
+/// What a saved side config says about one side. Absent means `NONE`, as a block placed by a
+/// command has in the real mod.
+pub(crate) fn side_value(nbt: &Compound, config: &str, index: usize) -> i32 {
+    let Some(Tag::Compound(saved)) = nbt.get(&JavaString::from("component_config")) else {
+        return 0;
+    };
+    match saved.get(&JavaString::from(config)) {
+        Some(Tag::IntArray(sides)) => sides.get(index).copied().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+thread_local! {
+    /// The cables of each level, in the order they first ticked, which is where a network's
+    /// targets get their order. A broken cable leaves when a network is next built.
+    static CABLES: RefCell<HashMap<String, Vec<[i32; 3]>>> = RefCell::new(HashMap::new());
+}
+
+impl Game<'_> {
+    pub(crate) fn mek_is_machine(block: &str) -> bool {
+        matches!(
+            block,
+            "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter"
+        )
+    }
+
+    /// `TileEntityRecipeMachine.containsRecipe`.
+    pub(crate) fn mek_has_recipe(&self, block: &str, stack: &horizon_client::items::ItemStack) -> bool {
+        let kind = match block {
+            "mekanism:enrichment_chamber" => "mekanism:enriching",
+            "mekanism:crusher" => "mekanism:crushing",
+            _ => {
+                let recipes = match &self.world_tables {
+                    Some(tables) => &tables.recipes,
+                    None => self.res.recipes(),
+                };
+                return recipes.cook("minecraft:smelting", stack).is_some();
+            }
+        };
+        self.native_recipes_of_type(kind).iter().any(|recipe| {
+            self.native_recipe_ingredient(&recipe.json["input"]["ingredient"])
+                .is_some_and(|ingredient| ingredient.test(stack))
+        })
+    }
+
+    fn mek_saved(&self, pos: [i32; 3]) -> Option<(&str, &Compound)> {
+        match self.world.block_entities.get(&(pos[0], pos[1], pos[2])) {
+            Some(horizon_client::containers::BlockEntity::Mod(entity)) if !entity.id.is_empty() => {
+                Some((entity.id.as_str(), &entity.nbt))
+            }
+            _ => None,
+        }
+    }
+
+    fn mek_is_cable(&self, pos: [i32; 3]) -> bool {
+        self.mek_saved(pos).is_some_and(|(id, _)| id == CABLE)
+    }
+
+    pub(crate) fn mek_register_cable(&self, pos: [i32; 3]) {
+        let dimension = self.dim.id().to_owned();
+        CABLES.with_borrow_mut(|cables| {
+            let level = cables.entry(dimension).or_default();
+            if !level.contains(&pos) {
+                level.push(pos);
+            }
+        });
+    }
+
+    /// The cables joined to `start`, nearest first.
+    fn mek_network(&self, start: [i32; 3]) -> Vec<[i32; 3]> {
+        let mut found = vec![start];
+        let mut next = 0;
+        while next < found.len() {
+            let at = found[next];
+            next += 1;
+            for side in DIRECTIONS {
+                let neighbour = offset(at, side);
+                if self.mek_is_cable(neighbour) && !found.contains(&neighbour) {
+                    found.push(neighbour);
+                }
+            }
+        }
+        found
+    }
+
+    fn mek_network_energy(&self, cables: &[[i32; 3]]) -> i64 {
+        cables
+            .iter()
+            .filter_map(|at| self.mek_saved(*at))
+            .map(|(_, nbt)| energy_of(nbt))
+            .sum()
+    }
+
+    fn mek_write_cable(&mut self, pos: [i32; 3], energy: i64) {
+        let key = (pos[0], pos[1], pos[2]);
+        if let Some(horizon_client::containers::BlockEntity::Mod(entity)) =
+            self.world.block_entities.get_mut(&key)
+        {
+            entity.nbt.insert(JavaString::from("energy"), Tag::Long(energy));
+            self.world.modified.insert((key.0 >> 4, key.2 >> 4));
+        }
+    }
+
+    /// How much the block at `pos` will take through `side` right now.
+    pub(crate) fn mek_energy_room(&mut self, pos: [i32; 3], side: Direction) -> i64 {
+        let Some((id, nbt)) = self.mek_saved(pos) else {
+            return 0;
+        };
+        if id == CABLE {
+            let cables = self.mek_network(pos);
+            let capacity = cables.len() as i64 * CABLE_CAPACITY;
+            return (capacity - self.mek_network_energy(&cables)).max(0);
+        }
+        let facing = self.mek_facing(pos);
+        let index = relative_index(facing, side);
+        let nbt_side = side_value(nbt, ENERGY_CONFIG, index);
+        if nbt_side != SIDE_INPUT {
+            return 0;
+        }
+        i64::from(self.native_energy_insert(pos, side, i32::MAX, true))
+    }
+
+    pub(crate) fn mek_facing(&self, pos: [i32; 3]) -> Direction {
+        let name = self.native_block_property(pos, "facing").unwrap_or_default();
+        facing_of(&name)
+    }
+
+    /// Gives the block at `pos` energy through `side`, up to what it will take. What went in.
+    pub(crate) fn mek_give_energy(&mut self, pos: [i32; 3], side: Direction, amount: i64) -> i64 {
+        let room = self.mek_energy_room(pos, side).min(amount);
+        if room <= 0 {
+            return 0;
+        }
+        if self.mek_is_cable(pos) {
+            let held = self.mek_saved(pos).map_or(0, |(_, nbt)| energy_of(nbt));
+            self.mek_write_cable(pos, held + room);
+            return room;
+        }
+        i64::from(self.native_energy_insert(pos, side, room as i32, false))
+    }
+
+    /// `EnergyUtils.emit`: splits up to `amount` among the blocks beside `pos` on `sides`.
+    pub(crate) fn mek_emit(&mut self, pos: [i32; 3], sides: &[Direction], amount: i64) -> i64 {
+        let targets: Vec<([i32; 3], Direction)> =
+            sides.iter().map(|side| (offset(pos, *side), opposite(*side))).collect();
+        self.mek_send(&targets, amount)
+    }
+
+    /// Whether the block has an energy handler on that side, which `SplitInfo` counts as a target
+    /// even if it won't take anything. A side set to `NONE` has none, as air and a hopper have none.
+    fn mek_has_energy_handler(&self, pos: [i32; 3], side: Direction) -> bool {
+        let Some((id, nbt)) = self.mek_saved(pos) else {
+            return false;
+        };
+        if id == CABLE {
+            return true;
+        }
+        if id == GENERATOR {
+            return side == self.mek_facing(pos);
+        }
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        if self.world.block_entities.mod_energy(state.0).is_none() {
+            return false;
+        }
+        let index = relative_index(self.mek_facing(pos), side);
+        side_value(nbt, ENERGY_CONFIG, index) != 0
+    }
+
+    fn mek_send(&mut self, targets: &[([i32; 3], Direction)], amount: i64) -> i64 {
+        let targets: Vec<([i32; 3], Direction)> = targets
+            .iter()
+            .copied()
+            .filter(|(at, side)| self.mek_has_energy_handler(*at, *side))
+            .collect();
+        let rooms: Vec<i64> = targets.iter().map(|(at, side)| self.mek_energy_room(*at, *side)).collect();
+        let shares = split(amount, &rooms);
+        targets
+            .iter()
+            .zip(shares)
+            .map(|((at, side), share)| self.mek_give_energy(*at, *side, share))
+            .sum()
+    }
+
+    /// `EnergyNetwork.tickEmit` and `updateSaveShares` for every network in this level. Machines
+    /// have all ticked by now.
+    pub(crate) fn mek_tick_networks(&mut self) {
+        let dimension = self.dim.id().to_owned();
+        let known = CABLES.with_borrow(|cables| cables.get(&dimension).cloned().unwrap_or_default());
+        let live: Vec<[i32; 3]> = known.into_iter().filter(|at| self.mek_is_cable(*at)).collect();
+        CABLES.with_borrow_mut(|cables| {
+            cables.insert(dimension, live.clone());
+        });
+        let mut done: Vec<[i32; 3]> = Vec::new();
+        for start in &live {
+            if done.contains(start) {
+                continue;
+            }
+            let joined = self.mek_network(*start);
+            done.extend_from_slice(&joined);
+            // Registration order, so targets come in the order the cables first ticked.
+            let cables: Vec<[i32; 3]> =
+                live.iter().copied().filter(|at| joined.contains(at)).collect();
+            self.mek_tick_network(&cables);
+        }
+    }
+
+    fn mek_tick_network(&mut self, cables: &[[i32; 3]]) {
+        let mut targets = Vec::new();
+        for cable in cables {
+            for side in DIRECTIONS {
+                let neighbour = offset(*cable, side);
+                if !self.mek_is_cable(neighbour) {
+                    targets.push((neighbour, opposite(side)));
+                }
+            }
+        }
+        let held = self.mek_network_energy(cables);
+        let sent = self.mek_send(&targets, held);
+        let left = held - sent;
+        let room = vec![CABLE_CAPACITY; cables.len()];
+        for (cable, share) in cables.iter().zip(split(left, &room)) {
+            self.mek_write_cable(*cable, share);
+        }
+    }
+
+    pub(crate) fn mek_is_lava(&self, pos: [i32; 3]) -> bool {
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        self.res.facts().get(state).fluid == horizon_client::blocks::Fluid::Lava
+    }
+
+    /// `HeatAPI.getAmbientTemp` at a position, from its biome and height.
+    pub(crate) fn mek_ambient(&self, pos: [i32; 3]) -> f64 {
+        const SEA_LEVEL: i32 = 63;
+        let biomes = match &self.world_biomes {
+            Some(biomes) => biomes,
+            None => self.res.biomes(),
+        };
+        let Some(chunk) = self.world.chunks.get(&(pos[0] >> 4, pos[2] >> 4)) else {
+            return 300.0;
+        };
+        let biome = &biomes.list[chunk.biome(pos[0], pos[1], pos[2]) as usize];
+        let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+        let temperature = f64::from(biome.temperature_at(at, SEA_LEVEL)).clamp(-5.0, 5.0);
+        300.0 + 25.0 * (temperature - 0.8)
+    }
+}

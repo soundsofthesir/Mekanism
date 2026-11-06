@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Phase 3 test: Mekanism's machines in Horizon against the real mod, tick by tick.
 
-    python3 port/test_phase3.py --engine port/.work/machine-export/horizon-engine --carry port/.work/check/carry
+    python3 port/test_phase3.py --engine port/.work/machine-export/horizon-engine
+    python3 port/test_phase3.py --engine port/.work/machine-export/horizon-engine --dedicated --eula
 
 Replays each recording in port/reference/ with the same `tick step` method that made it, and every
 row must match. Each machine starts in a new place, with the same contents as the recording.
@@ -17,7 +18,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from horizon_driver import SinglePlayer, TestFailure
+from horizon_driver import DedicatedServer, SinglePlayer, TestFailure, install_content
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE / ".work"
@@ -61,12 +62,12 @@ SCENARIOS = (
 )
 
 
-def game_time(world: SinglePlayer) -> int:
+def game_time(world) -> int:
     answer = " ".join(world.command("time query gametime"))
     return int(re.search(r"game time is (\d+)", answer).group(1))
 
 
-def step(world: SinglePlayer) -> None:
+def step(world) -> None:
     before = game_time(world)
     world.command("tick step 1")
     deadline = time.monotonic() + STEP_TIMEOUT_SECONDS
@@ -101,7 +102,7 @@ def row(tick: int, nbt: str) -> str:
     return "\t".join(map(str, fields))
 
 
-def place(world: SinglePlayer, scenario: Scenario, at: str) -> None:
+def place(world, scenario: Scenario, at: str) -> None:
     items = ",".join(
         f'{{Slot:{number_of_slot}b,id:"{item}",count:{count}}}'
         for number_of_slot, item, count in scenario.items
@@ -113,7 +114,7 @@ def place(world: SinglePlayer, scenario: Scenario, at: str) -> None:
         raise TestFailure(f"{scenario.name}: setblock answered {answer}")
 
 
-def replay(world: SinglePlayer, scenario: Scenario, x: int) -> list[str]:
+def replay(world, scenario: Scenario, x: int) -> list[str]:
     at = f"{x} {Y} 0"
     expected = (REFERENCE / f"{scenario.name}.tsv").read_text().splitlines()
     if expected[0] != HEADER:
@@ -136,7 +137,7 @@ def replay(world: SinglePlayer, scenario: Scenario, x: int) -> list[str]:
     return failures
 
 
-def scenario_run(world: SinglePlayer) -> None:
+def scenario_run(world) -> None:
     world.start()
     world.command("forceload add 0 -16 64 16")
     world.command("tick freeze")
@@ -152,14 +153,15 @@ def scenario_run(world: SinglePlayer) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--engine", type=Path, required=True)
-    parser.add_argument("--carry", type=Path, required=True, help="the carried content mod")
+    parser.add_argument("--dedicated", action="store_true")
+    parser.add_argument("--eula", action="store_true", help="you agree to the Minecraft EULA")
     args = parser.parse_args()
+    if args.dedicated and not args.eula:
+        parser.error("--dedicated writes eula=true: pass --eula if you agree to the Minecraft EULA")
     folder = Path(tempfile.mkdtemp(dir=WORK))
-    world = SinglePlayer(folder, args.engine.resolve(), {})
-    mods = world.game_dir / "horizon-mods"
-    mods.mkdir()
-    shutil.copytree(args.carry.resolve(), mods / "mekanism")
-    (world.game_dir / "horizon-mods.txt").write_text("mod.mekanism:true\n")
+    kind = DedicatedServer if args.dedicated else SinglePlayer
+    world = kind(folder, args.engine.resolve(), {})
+    install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
     try:
         scenario_run(world)
     except (TestFailure, subprocess.TimeoutExpired) as failure:

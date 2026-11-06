@@ -96,19 +96,37 @@ def start() -> None:
     )
     ssh(
         f"set -e; cd {ROOT}; docker rm -f {CONTAINER} >/dev/null 2>&1 || true; rm -rf world logs; "
-        f"printf 'eula=true\\n' > eula.txt; printf '{properties}\\n' > server.properties; "
+        f"printf 'eula=true\\n' > eula.txt; printf '{properties}\\n' > server.properties"
+    )
+    run_container()
+    wait_until_up()
+
+
+def run_container() -> None:
+    ssh(
+        f"set -e; cd {ROOT}; docker rm -f {CONTAINER} >/dev/null 2>&1 || true; "
         f"docker run -d --name {CONTAINER} --memory=4g --cpus=3 "
         f"-p 127.0.0.1:{RCON_PORT}:{RCON_PORT} -v {ROOT}:/s -w /s {IMAGE} "
         f"java -Xmx3G @libraries/net/neoforged/neoforge/{NEOFORGE}/unix_args.txt nogui >/dev/null"
     )
+
+
+def wait_until_up() -> None:
     deadline = time.monotonic() + START_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         log = ssh(f"grep -E 'Done \\(|Failed to start|Crash report|Mod loading error' {ROOT}/logs/latest.log || true")
         if log.strip():
-            print(log.strip()[-400:])
+            print(log.strip()[-200:])
             return
-        time.sleep(5)
+        time.sleep(3)
     raise SystemExit("the server did not start in time")
+
+
+def restart() -> None:
+    """Stops the server, which saves the world, and starts it again on the same world."""
+    ssh(f"docker stop -t 120 {CONTAINER} >/dev/null; rm -f {ROOT}/logs/latest.log")
+    run_container()
+    wait_until_up()
 
 
 def connect() -> tuple[Rcon, subprocess.Popen]:

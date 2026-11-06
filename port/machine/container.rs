@@ -3,13 +3,13 @@ fn mekmachine_container(block: &str, container: &mut Option<horizon_client::cont
         const INPUT: usize = 0;
         const OUTPUT: usize = 1;
         const ENERGY: usize = 2;
-        // Mekanism configures sides per machine. Until that is ported: in at the top, out below.
         *container = Some(horizon_client::containers::ModContainer {
             slots: 3,
-            faces: [vec![OUTPUT], vec![INPUT], vec![ENERGY], vec![ENERGY], vec![ENERGY], vec![ENERGY]],
+            // Every side reaches every slot here; `container_accepts` applies the saved config.
+            faces: std::array::from_fn(|_| vec![INPUT, OUTPUT, ENERGY]),
             inputs: vec![INPUT, ENERGY],
             outputs: vec![OUTPUT],
-            menu: None,
+            menu: Some(block.to_owned()),
         });
         return;
     }
