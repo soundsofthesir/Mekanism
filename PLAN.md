@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phases 0, 1 and 2 passed on 2026-11-06. Phase 3 is in progress: the done-when chain matches the real mod in single player. Dedicated server runs are being finished.
+Status: Phases 0 to 3 passed on 2026-11-06. Phases 4 to 7 are undecided, and their estimates should use Phase 3's measured sizes.
 
 ## Source and target
 
@@ -87,15 +87,30 @@ A block entity is out of the world during its own tick, so Horizon's energy and 
 
 Builds on this 8GB Mac: 4 min 32 s for the first and 2 min 7 s for a mod change, in the `dev` profile.
 
-## Phase 3 progress
+## Phase 3 result
 
-`port/test_phase3.py` replays 10 recordings of the real mod in Horizon with the same `tick step` method: 1,270 ticks and no differences. It compares progress, activity, energy and both slots.
+Phase 3's done-when is met for the machines and values below, in single player and on a dedicated server. Run all of it with `sh port/build_and_test.sh --trust-native-code --eula`, which writes `port/.work/results.txt`.
 
-`port/test_chain.py` replays cable networks, the Heat Generator and the whole chain. A generator and a cube power a chamber and a smelter through four cables and a hopper, turning 2 ore into 4 ingots. Power runs out, the world restarts, and a command adds energy, so the 900 rows after the restart prove what was saved. All 1,704 rows match in single player. Energy, lava, slots, progress and activity match exactly, and heat to within 0.000001.
+- `port/test_chain.py` replays cable networks, the Heat Generator and the whole chain from recordings of the real mod. A generator and a cube power a chamber and a smelter through four cables and a hopper, turning 2 ore into 4 ingots. Power runs out, the world restarts, and a command adds energy, so the 900 rows after the restart prove what was saved. All 1,704 rows match. Energy, lava, slots, progress and activity match exactly, and heat to within 0.000001.
+- `port/test_phase3.py` replays 10 recordings of the Enrichment Chamber, Crusher and Energized Smelter: 1,270 ticks with no differences.
+- `port/test_generator.py` replays 5 recordings of the generator's fuel slot, and fills it from its menu. Single player only.
+- `port/test_menu.py` plays as a player: a shift-click fills a machine, side buttons change its saved sides, a hopper follows them, and they survive a reload. Single player only, with no recording to compare, because the real mod's screens need a client.
 
-`port/test_menu.py` plays as a player: a shift-click fills a machine, side buttons change its saved sides, and a hopper follows them. `port/test_generator.py` replays the fuel slot.
+Two carry steps are needed. `port/add_common_tags.py` adds NeoForge's `c:` tags, because 131 of the 198 that Mekanism's recipes use were missing, which Phase 1's 4-recipe sample didn't catch. `port/add_machine_content.py` adds the menu types and replaces the cable's and basic cube's models.
 
-`port/add_common_tags.py` is needed after the carry. Mekanism's recipes name `c:` tags that NeoForge's jar provides, and 131 of the 198 they use were missing. Without them, recipes with those ingredients find nothing, which Phase 1's 4-recipe sample didn't catch. `port/add_machine_content.py` adds the menu types and replaces the cable's and cube's models.
+Known differences from the real mod:
+
+- Machines: no upgrades, redstone control, sounds, particles or radiation. Items aren't ejected on their own (`eject3` is ignored). Energy item slots are hidden. A menu's input slot takes any item, because Horizon's slot rule has no recipe table at hand, though a hopper is held to recipes.
+- Sides: a hopper putting items in follows the saved sides, but one taking items out doesn't, so a hopper below can always pull the output. A bare `setblock` gets the item's default sides here and none in the real mod.
+- Blocks: the three machines and the generator copy a furnace, so they have an unused `lit` state and face only the four compass directions. Their hardness, tools, sounds and shapes are unchecked against Java, as are the other carried blocks'.
+- Energy Cube: basic tier only, with no menu and no charge or discharge slots, so a player can't change its sides. Its transfer limit is per call, not per tick. Its model doesn't show side settings. Its energy doesn't stay in the item when broken (unverified against Java).
+- Universal Cable: basic tier only, with no connection modes or redstone control. A cable's model is a plain core and arms, not the real OBJ. Each cable's saved share is unverified, because the recordings compare the chain's cables by their sum. A network is searched afresh each tick, whose cost is unmeasured.
+- Heat Generator: no energy slot, no Nether bonus, no heat passed to a block below, and lava in its own block space isn't counted. A hopper can't pull out an empty bucket.
+- Screens are a plain layout, not Mekanism's art or tabs. Side buttons are coloured squares.
+- Not tested: a client on a dedicated server, other biomes or positions beyond the recorded ones, other recipes beyond iron ore, gold ore, cobblestone and raw iron in machines, and performance.
+- `port/machine` hooks one function outside the named catalog (`native_container_accepts`), so a Horizon update may break it.
+
+Measured sizes: `port/machine` is about 2,000 lines of glue and engine code, plus tests. That covers 6 machines and the shared layer, well under the 8-12k and 3-8k estimated for Phases 3 and 2, because the hooks do much of the work. A build after a mod change took 1 to 2 minutes.
 
 ## Java reference
 
@@ -158,4 +173,4 @@ The biggest unknowns are incremental build times, how far the untested hooks hol
 
 ## Scope
 
-Phases 0 to 3, decided on 2026-11-06. After Phase 3, replace the assumptions above with measured rates and decide on Phases 4 to 7.
+Phases 0 to 3, decided on 2026-11-06, are done. Deciding on Phases 4 to 7 comes next, with the assumptions above replaced by measured rates.
