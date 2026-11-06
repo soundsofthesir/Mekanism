@@ -158,23 +158,26 @@ Known differences from the real mod:
 
 Not tested: a client on a dedicated server, and frame time with many cables.
 
-Full run on the slice, `--all` after a clean build: 13 of 14 runs passed in 58 minutes. The 14th, `menu`, stopped when the game crashed while opening its world, before any of the test's checks. It then passed 3 of 3 runs on the same build. The crash is a null pointer in Horizon's `lan_host`, under `ChunkEncoder::with_signs` (macOS report at 22:20). This session started the game at least 40 times and saw it once. Its cause is unknown and it may recur in any group.
+Full run on the slice, `--all` after a clean build: 13 of 14 runs passed in 58 minutes. The 14th, `menu`, stopped when the game crashed while opening its world, before any of the test's checks. It then passed 3 of 3 runs on the same build. The crash is a null `Arc` clone in the `lan_host` closure while it maps `StateFacts`, under `ChunkEncoder::with_signs` (macOS report at 22:20). The cause is unknown. Nothing in `port/machine` names `lan_host` or `ChunkEncoder`, but that doesn't clear the mod, because its blocks are in that state table. It happened once in an estimated 40 launches and may recur in any group. A crash before a test's first check isn't a test failure, but it must be recorded here.
 
 Group times, each mode: chain 1,025 s, chemical 325 s, machines 265 s, generator 83 s, furnace 55 s and 39 s, menu 40 s, cable look 33 s, GUI 24 s, transfer 17 s and 14 s. The chain's two modes are 58% of a full run. A row there takes about 0.6 s, because each read starts a `horizon-ctl` process, so a batched read would save the most time.
 
 ### Cost against the model
 
-Turns are estimated from the session's transcript, not counted by a tool. Times are wall clock and overlap, because reading for one item ran during another's build, and they leave out test runs waiting in the background.
+Measured from the session's transcript:
 
-| Item | Turns | Elapsed | Hand-written Rust | Plan's units | Per unit |
-|---|---|---|---|---|---|
-| Test split | 3 | under 5 min | 0 (190 lines of Python) | Not in the model | |
-| Chemicals, tube, oxidizer, tank | About 13 | 43 min | About 640 | 2 hard, 1 medium | About 5 turns, 15 min, 250 lines |
-| GUI core and side window | About 13 | About 35 min | About 660 | 1 of 2 hard | 13 turns, 35 min, 660 lines |
-| Cable renderer | About 8 | About 30 min | About 220, plus 205 generated | 1 hard, in part | 8 turns, 30 min, 220 lines |
-| Whole slice | About 45, plus 7 waiting | 1.3 h, then 1 h for the full run | About 1,520 | | |
+| Measure | Slice |
+|---|---|
+| Turns | 99 |
+| Time | 2.4 hours, 20:48 to 23:10 |
+| Total tokens | 34.6M, 191k of it output |
+| Context per turn | Mean 347k, ending at 513k |
+| Hand-written Rust | About 1,520 lines, plus 205 generated |
+| Scripts | About 1,000 lines of Python |
 
-The model says a hard unit takes 20-40 turns, 0.6-1.5 hours and 300-800 lines. The slice came in under on turns and at or below the low end on hours, with lines in range. Scripts add about 1,000 lines of Python, or 0.65 per Rust line against the 1.5 measured before.
+Rust lines by item: chemicals, tube, oxidizer and tank about 640; GUI core and side window about 660; cable renderer about 220. The transcript gives no turns or hours by item.
+
+The slice is about 4 hard units and 1 medium. With the 1.2 to 1.5 multiplier, the model gives 100 to 260 turns and 3.1 to 9.8 hours for that, so 99 turns and 2.4 hours are at the low end. Context per turn is at the model's high end of 400k and passed it. Scripts add about 0.65 lines of Python per Rust line against the 1.5 measured before.
 
 Limits on reading this:
 
@@ -212,6 +215,8 @@ Each machine is compared against the Java mod in a fixture world: output, energy
 - **Low, dropped integrations.** The first version leaves out the 15k lines of integrations, such as other mods' APIs, and the mod's in-game config screens.
 
 ## Estimate
+
+The Phase 4 slice came in at the low end on turns and hours and at the high end on context per turn, so the phase totals below are unchanged.
 
 Re-estimated on 2026-11-06 from Phases 0 to 3. Phases 4 to 7 are still a model and could be off by a factor of 2 to 3, because the measurements come from the simplest machines.
 
