@@ -1,13 +1,37 @@
 fn mekmachine_menu_button(entity: &mut horizon_client::containers::ModBlockEntity, id: i32) {
     use crate::game::mek;
-    if !crate::game::Game::mek_is_machine(&entity.id) || !(0..2 * mek::BUTTONS_PER_ROW).contains(&id) {
+    use mekmachine_engine::gui_layout::{CLEAR_BASE, EJECT_BASE, ENERGY_KIND, KINDS, RIGHT_CLICK_BASE, SHIFT_CLICK_BASE};
+    if !crate::game::Game::mek_is_machine(&entity.id) {
         return;
     }
-    let index = (id % mek::BUTTONS_PER_ROW) as usize;
     let nbt = &mut entity.nbt;
-    if id < mek::BUTTONS_PER_ROW {
-        mek::cycle_side(nbt, mek::ITEM_CONFIG, index, &mek::ITEM_SIDE_CYCLE);
-    } else {
-        mek::cycle_side(nbt, mek::ENERGY_CONFIG, index, &mek::ENERGY_SIDE_CYCLE);
+    let config_of = |kind: usize| {
+        if kind == ENERGY_KIND {
+            (mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE[..], mek::ENERGY_EJECT)
+        } else {
+            (mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE[..], mek::ITEM_EJECT)
+        }
+    };
+    let row = mek::BUTTONS_PER_ROW;
+    let rows = KINDS as i32 * row;
+    if (0..rows).contains(&id) {
+        let (config, cycle, _) = config_of((id / row) as usize);
+        mek::cycle_side(nbt, config, (id % row) as usize, cycle, 1);
+    } else if (RIGHT_CLICK_BASE..RIGHT_CLICK_BASE + rows).contains(&id) {
+        let offset = id - RIGHT_CLICK_BASE;
+        let (config, cycle, _) = config_of((offset / row) as usize);
+        mek::cycle_side(nbt, config, (offset % row) as usize, cycle, cycle.len() - 1);
+    } else if (SHIFT_CLICK_BASE..SHIFT_CLICK_BASE + rows).contains(&id) {
+        let offset = id - SHIFT_CLICK_BASE;
+        let (config, _, _) = config_of((offset / row) as usize);
+        mek::set_side(nbt, config, (offset % row) as usize, 0);
+    } else if (EJECT_BASE..EJECT_BASE + KINDS as i32).contains(&id) {
+        let (_, _, eject) = config_of((id - EJECT_BASE) as usize);
+        mek::toggle_eject(nbt, eject);
+    } else if (CLEAR_BASE..CLEAR_BASE + KINDS as i32).contains(&id) {
+        let (config, _, _) = config_of((id - CLEAR_BASE) as usize);
+        for index in 0..mek::SIDES {
+            mek::set_side(nbt, config, index, 0);
+        }
     }
 }

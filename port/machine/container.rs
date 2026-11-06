@@ -13,6 +13,19 @@ fn mekmachine_container(block: &str, container: &mut Option<horizon_client::cont
         });
         return;
     }
+    if block == crate::game::chem::OXIDIZER {
+        const INPUT: usize = 0;
+        const CHEMICAL_ITEM: usize = 1;
+        const ENERGY: usize = 2;
+        *container = Some(horizon_client::containers::ModContainer {
+            slots: 3,
+            faces: std::array::from_fn(|_| vec![INPUT, CHEMICAL_ITEM, ENERGY]),
+            inputs: vec![INPUT, ENERGY],
+            outputs: vec![CHEMICAL_ITEM],
+            menu: Some(block.to_owned()),
+        });
+        return;
+    }
     if block == crate::game::mek::GENERATOR {
         const FUEL: usize = 0;
         *container = Some(horizon_client::containers::ModContainer {

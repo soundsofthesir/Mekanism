@@ -48,11 +48,18 @@ pub(crate) fn has_block_entity(block: &str) -> bool {
     ) || block == CUBE
         || block == CABLE
         || block == GENERATOR
+        || matches!(block, super::chem::OXIDIZER | super::chem::TUBE | super::chem::TANK)
 }
 
 /// The side config a block's item gives it when placed (`AttachedSideConfig`). The real mod applies
 /// it only to a player's placement, so a bare `setblock` there has none and one here does.
 pub(crate) fn default_config(block: &str) -> Compound {
+    if block == super::chem::OXIDIZER {
+        return chemical_out_config();
+    }
+    if block == super::chem::TANK {
+        return chemical_tank_config();
+    }
     let (energy, items): ([i32; 6], [i32; 6]) = match block {
         CUBE => (CUBE_ENERGY_SIDES, CUBE_ITEM_SIDES),
         "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" => {
@@ -66,6 +73,31 @@ pub(crate) fn default_config(block: &str) -> Compound {
     if block == CUBE {
         config.insert(JavaString::from("eject0"), Tag::Byte(1));
     }
+    let mut nbt = Compound::new();
+    nbt.insert(JavaString::from("component_config"), Tag::Compound(config));
+    nbt
+}
+
+/// `AttachedSideConfig.CHEMICAL_OUT_MACHINE`: `LightConfigInfo.RIGHT_OUTPUT` ejects.
+fn chemical_out_config() -> Compound {
+    const RIGHT_OUTPUT: [i32; 6] = [0, 0, SIDE_OUTPUT, 0, 0, 0];
+    let mut config = Compound::new();
+    config.insert(JavaString::from(ENERGY_CONFIG), Tag::IntArray(vec![SIDE_INPUT; 6]));
+    config.insert(JavaString::from(ITEM_CONFIG), Tag::IntArray(MACHINE_ITEM_SIDES.to_vec()));
+    config.insert(JavaString::from(super::chem::CHEMICAL_CONFIG), Tag::IntArray(RIGHT_OUTPUT.to_vec()));
+    config.insert(JavaString::from("eject2"), Tag::Byte(1));
+    let mut nbt = Compound::new();
+    nbt.insert(JavaString::from("component_config"), Tag::Compound(config));
+    nbt
+}
+
+/// `ItemBlockChemicalTank.SIDE_CONFIG`: `FRONT_OUT_EJECT` for chemicals, no eject for items.
+fn chemical_tank_config() -> Compound {
+    const FRONT_OUT: [i32; 6] = [SIDE_OUTPUT, SIDE_INPUT, SIDE_INPUT, SIDE_INPUT, SIDE_INPUT, SIDE_INPUT];
+    let mut config = Compound::new();
+    config.insert(JavaString::from(super::chem::CHEMICAL_CONFIG), Tag::IntArray(FRONT_OUT.to_vec()));
+    config.insert(JavaString::from(ITEM_CONFIG), Tag::IntArray(FRONT_OUT.to_vec()));
+    config.insert(JavaString::from("eject2"), Tag::Byte(1));
     let mut nbt = Compound::new();
     nbt.insert(JavaString::from("component_config"), Tag::Compound(config));
     nbt
@@ -91,53 +123,70 @@ pub(crate) const BUTTONS_PER_ROW: i32 = 6;
 pub(crate) const ITEM_SIDE_CYCLE: [i32; 4] = [0, SIDE_INPUT, SIDE_OUTPUT, SIDE_ENERGY];
 pub(crate) const ENERGY_SIDE_CYCLE: [i32; 2] = [0, SIDE_INPUT];
 
-/// Screen layout, from `GuiElectricMachine`: the progress bar, the power bar.
-pub(crate) const PROGRESS_BAR: [f32; 4] = [86.0, 38.0, 25.0, 9.0];
-pub(crate) const POWER_BAR: [f32; 4] = [164.0, 16.0, 6.0, 52.0];
-pub(crate) const SIDE_BUTTON_SIZE: f32 = 7.0;
-const SIDE_BUTTON_LEFT: f32 = 8.0;
-const SIDE_BUTTON_TOP: f32 = 18.0;
-const SIDE_BUTTON_STEP: f32 = 8.0;
-
-/// Where a side's button sits, row 0 for items and row 1 for energy, in the screen's own pixels.
-pub(crate) fn side_button(row: usize, index: usize) -> [f32; 2] {
-    let column = index % 3;
-    let line = index / 3;
-    [
-        SIDE_BUTTON_LEFT + SIDE_BUTTON_STEP * column as f32,
-        SIDE_BUTTON_TOP + SIDE_BUTTON_STEP * (line + 3 * row) as f32,
-    ]
-}
+/// The bits above a packed side config in a data slot: whether that kind ejects.
+pub(crate) const EJECT_BIT: i32 = 12;
+pub(crate) const SIDES: usize = 6;
+pub(crate) const ITEM_EJECT: &str = "eject3";
+pub(crate) const ENERGY_EJECT: &str = "eject0";
 
 /// A side config packed into a data slot, 2 bits a side, as an index into its cycle.
 pub(crate) fn pack_sides(nbt: &Compound, config: &str, cycle: &[i32]) -> i32 {
-    (0..6).fold(0, |packed, index| {
+    let eject = if config == ITEM_CONFIG { ITEM_EJECT } else { ENERGY_EJECT };
+    let packed = (0..SIDES).fold(0, |packed, index| {
         let value = side_value(nbt, config, index);
         let position = cycle.iter().position(|v| *v == value).unwrap_or(0) as i32;
         packed | (position << (2 * index))
-    })
+    });
+    packed | (i32::from(is_ejecting(nbt, eject)) << EJECT_BIT)
+}
+
+pub(crate) fn is_ejecting(nbt: &Compound, eject: &str) -> bool {
+    matches!(
+        nbt.get(&JavaString::from("component_config")),
+        Some(Tag::Compound(config)) if matches!(config.get(&JavaString::from(eject)), Some(Tag::Byte(1)))
+    )
+}
+
+pub(crate) fn toggle_eject(nbt: &mut Compound, eject: &str) {
+    let on = is_ejecting(nbt, eject);
+    if let Tag::Compound(config) = nbt
+        .entry(JavaString::from("component_config"))
+        .or_insert_with(|| Tag::Compound(Compound::new()))
+    {
+        config.insert(JavaString::from(eject), Tag::Byte(i8::from(!on)));
+    }
 }
 
 pub(crate) fn unpack_side(packed: i32, index: usize) -> usize {
     ((packed >> (2 * index)) & 3) as usize
 }
 
-/// Moves one side of a saved config on to the next value of its cycle.
-pub(crate) fn cycle_side(nbt: &mut Compound, config: &str, index: usize, cycle: &[i32]) {
+fn side_mut<'a>(nbt: &'a mut Compound, config: &str, index: usize) -> Option<&'a mut i32> {
     let key = JavaString::from("component_config");
     let saved = nbt.entry(key).or_insert_with(|| Tag::Compound(Compound::new()));
     let Tag::Compound(saved) = saved else {
-        return;
+        return None;
     };
     let sides = saved
         .entry(JavaString::from(config))
-        .or_insert_with(|| Tag::IntArray(vec![0; 6]));
+        .or_insert_with(|| Tag::IntArray(vec![0; SIDES]));
     let Tag::IntArray(sides) = sides else {
-        return;
+        return None;
     };
-    if let Some(side) = sides.get_mut(index) {
+    sides.get_mut(index)
+}
+
+/// Moves one side of a saved config `steps` along its cycle.
+pub(crate) fn cycle_side(nbt: &mut Compound, config: &str, index: usize, cycle: &[i32], steps: usize) {
+    if let Some(side) = side_mut(nbt, config, index) {
         let position = cycle.iter().position(|v| v == side).unwrap_or(0);
-        *side = cycle[(position + 1) % cycle.len()];
+        *side = cycle[(position + steps) % cycle.len()];
+    }
+}
+
+pub(crate) fn set_side(nbt: &mut Compound, config: &str, index: usize, value: i32) {
+    if let Some(side) = side_mut(nbt, config, index) {
+        *side = value;
     }
 }
 
@@ -230,6 +279,75 @@ thread_local! {
 }
 
 impl Game<'_> {
+    /// `RenderUniversalCable` over `TransmitterBlockStateModel`: the model's parts for each side's
+    /// connection, then, full bright, what the cable holds. The real mod's scale is the network's and
+    /// fades by 0.02 a tick; here it is this cable's share of its capacity.
+    pub(crate) fn mek_draw_cable(
+        &self,
+        state: horizon_world::registry::BlockStateId,
+        entity: &horizon_client::containers::ModBlockEntity,
+        draw: &mut super::native_block_entity_draw::BlockEntityDraw,
+    ) {
+        use mekmachine_engine::transmitter_draw::{self as plan, Part, SIDES as SIDE_NAMES};
+        use mekmachine_engine::transmitter_model::{CONTENTS, SMALL};
+        const SIDE: &str = "mekanism:block/models/multipart/basic_universal_cable_vertical";
+        const CENTRE: &str = "mekanism:block/models/multipart/basic_universal_cable";
+        const ENERGY: &str = "mekanism:block/port_energy";
+        const WHITE: u32 = 0xFF_FFFF;
+        const FULL_BRIGHT: u32 = 240 | 240 << 8;
+        const PIVOT: [f32; 3] = [0.5, 0.5, 0.5];
+        let connected = SIDE_NAMES.map(|name| {
+            self.native_block_state_property(state, name) == Some("true")
+        });
+        for part in plan::parts(connected) {
+            let Part { group, centre_as_side, rotate_about } = part;
+            let Some(found) = SMALL.iter().find(|each| each.name == group) else {
+                continue;
+            };
+            draw.push();
+            if let Some(axis) = rotate_about {
+                draw.rotate_about(axis, plan::CONTIGUOUS_DEGREES, PIVOT);
+            }
+            for face in found.faces {
+                let sprite = if face.centre && !centre_as_side { CENTRE } else { SIDE };
+                self.native_draw_quad(draw, sprite, face.corners, face.uv, WHITE);
+            }
+            draw.pop();
+        }
+        let scale = plan::contents_scale(energy_of(&entity.nbt), CABLE_CAPACITY);
+        if scale <= 0.0 {
+            return;
+        }
+        let light = draw.light;
+        draw.light = FULL_BRIGHT;
+        let alpha = (scale * 255.0).round() as u32;
+        for name in plan::contents_groups(connected) {
+            let Some(found) = CONTENTS.iter().find(|each| each.name == name) else {
+                continue;
+            };
+            for face in found.faces {
+                let before = draw.vertices_mut().len();
+                self.native_draw_quad(draw, ENERGY, face.corners, face.uv, WHITE);
+                // A vertex's colour is RGBA8, with alpha in its top byte here.
+                for vertex in &mut draw.vertices_mut()[before..] {
+                    vertex.color = (vertex.color & 0x00FF_FFFF) | (alpha << 24);
+                }
+            }
+        }
+        draw.light = light;
+    }
+
+    /// Sends a press to the server as `native_screen_click` would. The hook that presses arrive on
+    /// has no way to play the click sound.
+    pub(crate) fn mek_send_menu_button(&self, button: i32) {
+        let window = self.remote.as_ref().and_then(|r| r.menu.as_ref()).map(|(w, _)| *w);
+        if let Some(container) = window {
+            self.send(horizon_protocol::packets::play::Serverbound::ContainerButtonClick(
+                horizon_protocol::packets::play::ContainerButtonClick { container, button },
+            ));
+        }
+    }
+
     pub(crate) fn mek_is_machine(block: &str) -> bool {
         matches!(
             block,
@@ -319,11 +437,18 @@ impl Game<'_> {
 
     fn mek_write_cable(&mut self, pos: [i32; 3], energy: i64) {
         let key = (pos[0], pos[1], pos[2]);
+        let mut seen_change = false;
         if let Some(horizon_client::containers::BlockEntity::Mod(entity)) =
             self.world.block_entities.get_mut(&key)
         {
+            let before = energy_of(&entity.nbt);
             entity.nbt.insert(JavaString::from("energy"), Tag::Long(energy));
             self.world.modified.insert((key.0 >> 4, key.2 >> 4));
+            // `MekanismUtils.scaleChanged`: clients hear of a change of 1% of the capacity or more.
+            seen_change = before * 100 / CABLE_CAPACITY != energy * 100 / CABLE_CAPACITY;
+        }
+        if seen_change {
+            self.native_block_entity_sync(pos);
         }
     }
 

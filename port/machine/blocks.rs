@@ -19,6 +19,12 @@ fn mekmachine_blocks(blocks: &mut Vec<horizon_mods::content::Block>) {
         });
     }
     blocks.push(horizon_mods::content::Block {
+        id: crate::game::chem::OXIDIZER.into(),
+        template: "minecraft:furnace".into(),
+        item: true,
+        ..Default::default()
+    });
+    blocks.push(horizon_mods::content::Block {
         id: "mekanismgenerators:heat_generator".into(),
         template: "minecraft:furnace".into(),
         state_properties: [("active".to_owned(), horizon_mods::content::StateProperty::Boolean)]

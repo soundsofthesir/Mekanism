@@ -27,11 +27,13 @@ RUN_SECONDS = 3
 INPUT_MENU_SLOT = 300
 OUTPUT_MENU_SLOT = 301
 HOTBAR_SLOT = 0
-# Screen positions, from port/machine: where the input slot is, and each top-side button.
+# Screen positions, from `GuiElectricMachine` and `GuiSideConfiguration`: the input slot, the side
+# config tab's button, the window's corner and the top side's button in it.
 INPUT_SLOT_AT = (64, 17)
+SIDE_TAB_MIDDLE = (-21 + 9, 10 + 9)
+WINDOW_AT = (10, 15)
 TOP_INDEX = 4
-SIDE_BUTTON_LEFT, SIDE_BUTTON_TOP, SIDE_BUTTON_STEP = 8, 18, 8
-SIDE_BUTTON_MIDDLE = 3
+TOP_BUTTON_MIDDLE = (67 + 11, 46 + 11)
 # `LightConfigInfo.MACHINE` and `INPUT_ONLY`, in front, left, right, back, top, bottom order.
 DEFAULT_ITEM_SIDES = [1, 1, 4, 8, 1, 1]
 DEFAULT_ENERGY_SIDES = [1, 1, 1, 1, 1, 1]
@@ -108,12 +110,20 @@ def check_menu_runs_the_machine(world, screenshot: Path | None) -> None:
 
 
 def press_side_button(world, screen_x: float, screen_y: float, index: int) -> None:
-    column, line = index % 3, index // 3
-    world.ctl(
-        "click-at",
-        screen_x + SIDE_BUTTON_LEFT + SIDE_BUTTON_STEP * column + SIDE_BUTTON_MIDDLE,
-        screen_y + SIDE_BUTTON_TOP + SIDE_BUTTON_STEP * line + SIDE_BUTTON_MIDDLE,
+    """Opens the side config window, presses the top side's button and closes the window."""
+    if index != TOP_INDEX:
+        raise TestFailure("only the top side's button is mapped here")
+    click(world, screen_x + SIDE_TAB_MIDDLE[0], screen_y + SIDE_TAB_MIDDLE[1])
+    click(
+        world,
+        screen_x + WINDOW_AT[0] + TOP_BUTTON_MIDDLE[0],
+        screen_y + WINDOW_AT[1] + TOP_BUTTON_MIDDLE[1],
     )
+    click(world, screen_x + SIDE_TAB_MIDDLE[0], screen_y + SIDE_TAB_MIDDLE[1])
+
+
+def click(world, x: float, y: float) -> None:
+    world.ctl("click-at", x, y)
     time.sleep(SETTLE_SECONDS)
 
 

@@ -115,6 +115,30 @@ file = "crates/horizon-client/src/game.rs"
 name = "mek"
 source = "mek.rs"
 
+[[module]]
+id = "gui"
+file = "crates/horizon-client/src/game.rs"
+name = "gui"
+source = "gui.rs"
+
+[[module]]
+id = "chem"
+file = "crates/horizon-client/src/game.rs"
+name = "chem"
+source = "chem.rs"
+
+[[injection]]
+id = "chemicals"
+hook = "block_entity_tick"
+hook_version = 1
+kind = "HEAD"
+helper = "chemicals.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
+]
+
 [[injection]]
 id = "power"
 hook = "block_entity_tick"
@@ -163,15 +187,78 @@ bindings = [
 ]
 
 [[injection]]
+id = "cable_draw"
+hook = "block_entity_submit"
+hook_version = 1
+kind = "HEAD"
+helper = "cable_draw.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "block", ty = "&str", value = "block" },
+  { name = "state", ty = "horizon_world::registry::BlockStateId", value = "state" },
+  { name = "entity", ty = "&horizon_client::containers::ModBlockEntity", value = "entity" },
+  { name = "draw", ty = "&mut crate::game::native_block_entity_draw::BlockEntityDraw", value = "&mut *draw" },
+]
+
+[[injection]]
+id = "update_tag"
+hook = "block_entity_update_tag"
+hook_version = 1
+kind = "HEAD"
+helper = "update_tag.rs"
+bindings = [
+  { name = "entity", ty = "&horizon_client::containers::ModBlockEntity", value = "entity" },
+  { name = "tag", ty = "&mut Option<horizon_world::nbt::Compound>", value = "&mut *tag" },
+]
+
+[[injection]]
 id = "screen_click"
-hook = "screen_click"
+hook = "screen_mouse_button_pressed_pre"
 hook_version = 1
 kind = "HEAD"
 helper = "screen_click.rs"
 bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "button", ty = "i32", value = "button" },
+  { name = "modifiers", ty = "u32", value = "modifiers" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "screen_post"
+hook = "screen_render_post"
+hook_version = 1
+kind = "HEAD"
+helper = "screen_post.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+]
+
+[[injection]]
+id = "screen_open"
+hook = "screen_opening"
+hook_version = 1
+kind = "HEAD"
+helper = "screen_open.rs"
+bindings = [
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+]
+
+[[injection]]
+id = "screen_tooltip"
+hook = "screen_tooltip"
+hook_version = 1
+kind = "HEAD"
+helper = "screen_tooltip.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
   { name = "block", ty = "&str", value = "block" },
+  { name = "data", ty = "&[i32]", value = "data" },
   { name = "at", ty = "[f32; 2]", value = "at" },
-  { name = "button", ty = "&mut Option<i32>", value = "&mut *button" },
+  { name = "lines", ty = "&mut Vec<String>", value = "&mut *lines" },
 ]
 
 [[injection]]

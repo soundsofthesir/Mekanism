@@ -1,5 +1,6 @@
-//! Mekanism's one-input electric machines: the Enrichment Chamber, Crusher and Energized Smelter.
-//! This follows `CachedRecipe.process` with `OneInputCachedRecipe`, without upgrades.
+//! Mekanism's one-input machines: the Enrichment Chamber, Crusher, Energized Smelter and, with a
+//! chemical output, the Chemical Oxidizer. This follows `CachedRecipe.process` with
+//! `OneInputCachedRecipe`, without upgrades.
 use crate::furnace::Stack;
 
 /// `TileEntityElectricMachine.BASE_TICKS_REQUIRED`.
@@ -7,23 +8,46 @@ pub const TICKS_REQUIRED: i32 = 200;
 
 /// A recipe that matches an input.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Recipe {
+pub struct Recipe<M = Stack> {
     pub id: String,
     pub input_count: u32,
-    pub output: Stack,
+    pub output: M,
 }
 
 /// What the machine asks the game.
-pub trait Recipes {
-    fn find(&self, input: &Stack) -> Option<Recipe>;
+pub trait Recipes<M = Stack> {
+    fn find(&self, input: &Stack) -> Option<Recipe<M>>;
     fn max_stack(&self, item: &str) -> u32;
+}
+
+/// Where a machine puts what it makes: an item slot or a chemical tank.
+pub trait Output {
+    type Made;
+    fn fits(&self, made: &Self::Made, max_stack: &dyn Fn(&str) -> u32) -> bool;
+    fn put(&mut self, made: &Self::Made);
+}
+
+impl Output for Option<Stack> {
+    type Made = Stack;
+
+    fn fits(&self, made: &Stack, max_stack: &dyn Fn(&str) -> u32) -> bool {
+        self.as_ref()
+            .is_none_or(|out| out.item == made.item && out.count + made.count <= max_stack(&out.item))
+    }
+
+    fn put(&mut self, made: &Stack) {
+        match self.as_mut() {
+            Some(out) => out.count += made.count,
+            None => *self = Some(made.clone()),
+        }
+    }
 }
 
 /// A machine's slots and saved numbers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Machine {
+pub struct Machine<O = Option<Stack>> {
     pub input: Option<Stack>,
-    pub output: Option<Stack>,
+    pub output: O,
     pub energy: i64,
     pub progress: i32,
     pub active: bool,
@@ -31,8 +55,12 @@ pub struct Machine {
     pub recipe: Option<String>,
 }
 
-impl Machine {
-    pub fn tick(&mut self, recipes: &dyn Recipes, energy_per_tick: i64) {
+impl<O: Output> Machine<O> {
+    pub fn tick(&mut self, recipes: &dyn Recipes<O::Made>, energy_per_tick: i64) {
+        self.tick_for(recipes, energy_per_tick, TICKS_REQUIRED);
+    }
+
+    pub fn tick_for(&mut self, recipes: &dyn Recipes<O::Made>, energy_per_tick: i64, ticks_required: i32) {
         let found = self.input.as_ref().and_then(|input| recipes.find(input));
         let Some(recipe) = found else {
             self.stop_and_reset();
@@ -50,13 +78,14 @@ impl Machine {
             self.stop_and_reset();
             return;
         }
-        if !self.output_fits(recipes, &recipe) || self.energy < energy_per_tick {
+        let fits = self.output.fits(&recipe.output, &|item: &str| recipes.max_stack(item));
+        if !fits || self.energy < energy_per_tick {
             self.active = false;
             return;
         }
         self.energy -= energy_per_tick;
         self.active = true;
-        if self.progress >= TICKS_REQUIRED - 1 {
+        if self.progress >= ticks_required - 1 {
             self.finish(&recipe);
         } else {
             self.progress += 1;
@@ -68,19 +97,9 @@ impl Machine {
         self.progress = 0;
     }
 
-    fn output_fits(&self, recipes: &dyn Recipes, recipe: &Recipe) -> bool {
-        self.output.as_ref().is_none_or(|out| {
-            out.item == recipe.output.item
-                && out.count + recipe.output.count <= recipes.max_stack(&out.item)
-        })
-    }
-
-    fn finish(&mut self, recipe: &Recipe) {
+    fn finish(&mut self, recipe: &Recipe<O::Made>) {
         self.progress = 0;
-        match self.output.as_mut() {
-            Some(out) => out.count += recipe.output.count,
-            None => self.output = Some(recipe.output.clone()),
-        }
+        self.output.put(&recipe.output);
         if let Some(input) = self.input.as_mut() {
             input.count -= recipe.input_count;
             if input.count == 0 {

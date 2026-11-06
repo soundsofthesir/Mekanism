@@ -1,0 +1,8 @@
+0, 100, 0 has the following block data: {components: {}, dumping: "idle", current_redstone: 0, component_config: {config2: [I; 4, 4, 4, 4, 4, 4], config3: [I; 0, 0, 0, 0, 0, 0], eject3: 0b, eject2: 1b}, x: 0, y: 100, z: 0, id: "mekanism:basic_chemical_tank", redstone: 0b, control_type: "disabled"}
+
+1, 100, 0 has the following block data: {components: {}, stored: {amount: 1667L, type: "mekanism:sulfur_dioxide"}, x: 1, y: 100, connection: [I; 0, 0, 0, 0, 0, 0], z: 0, id: "mekanism:basic_pressurized_tube", acceptors: 16b, redstone: 0b, connections: 32b}
+
+2, 100, 0 has the following block data: {components: {}, stored: {amount: 1666L, type: "mekanism:sulfur_dioxide"}, x: 2, y: 100, connection: [I; 0, 0, 0, 0, 0, 0], z: 0, id: "mekanism:basic_pressurized_tube", acceptors: 0b, redstone: 0b, connections: 48b}
+
+3, 100, 0 has the following block data: {components: {}, stored: {amount: 1667L, type: "mekanism:sulfur_dioxide"}, x: 3, y: 100, connection: [I; 0, 0, 0, 0, 0, 0], z: 0, id: "mekanism:basic_pressurized_tube", acceptors: 0b, redstone: 0b, connections: 16b}
+
