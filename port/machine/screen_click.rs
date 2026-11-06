@@ -1,15 +1,35 @@
-fn mekmachine_screen_click(block: &str, at: [f32; 2], button: &mut Option<i32>) {
-    use crate::game::mek;
-    if !crate::game::Game::mek_is_machine(block) {
+// A press on a machine's screen. It runs before the game's slots, so the side config window can cover
+// them, and it sends its own button clicks.
+fn mekmachine_screen_press(
+    game: &crate::game::Game<'_>,
+    screen: &horizon_client::mod_api::NativeScreenView<'_>,
+    button: i32,
+    modifiers: u32,
+    canceled: &mut bool,
+) {
+    use crate::game::gui;
+    use mekmachine_engine::gui_layout::{Click, Press, press};
+    const LEFT_BUTTON: i32 = 0;
+    const RIGHT_BUTTON: i32 = 1;
+    const SHIFT: u32 = 1;
+    if !screen.menu.is_some_and(crate::game::Game::mek_is_machine) {
         return;
     }
-    for row in 0..2 {
-        for index in 0..6 {
-            let [x, y] = mek::side_button(row, index);
-            let size = mek::SIDE_BUTTON_SIZE;
-            if at[0] >= x && at[0] < x + size && at[1] >= y && at[1] < y + size {
-                *button = Some(row as i32 * mek::BUTTONS_PER_ROW + index as i32);
-            }
-        }
+    let click = match button {
+        RIGHT_BUTTON => Click::Right,
+        LEFT_BUTTON if modifiers & SHIFT != 0 => Click::Shift,
+        LEFT_BUTTON => Click::Left,
+        _ => return,
+    };
+    let origin = gui::origin();
+    let at = [screen.mouse[0] - origin[0], screen.mouse[1] - origin[1]];
+    match press(at, gui::open_kind(), click) {
+        Press::Pass => return,
+        Press::Nothing => {}
+        Press::OpenWindow => gui::set_open_kind(Some(mekmachine_engine::gui_layout::ITEM_KIND)),
+        Press::CloseWindow => gui::set_open_kind(None),
+        Press::ShowKind(kind) => gui::set_open_kind(Some(kind)),
+        Press::Button(id) => game.mek_send_menu_button(id),
     }
+    *canceled = true;
 }

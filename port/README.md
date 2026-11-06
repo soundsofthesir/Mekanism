@@ -8,7 +8,7 @@ horizon-port-pack check port/.work/mekanism-10.8.0-resources.jar port/.work/chec
 python3 port/patch_worldgen.py port/.work/check/carry
 python3 port/add_common_tags.py port/.work/neoforge-26.3.0.100-universal.jar port/.work/check/carry
 horizon-port-pack check port/.work/MekanismGenerators-26.3-10.8.0.homebaked.jar port/.work/check-generators
-python3 port/add_machine_content.py port/.work/check/carry port/.work/check-generators/carry
+python3 port/add_machine_content.py port/.work/check/carry port/.work/check-generators/carry upstream
 python3 port/test_phase1.py port/.work/check/carry
 ```
 

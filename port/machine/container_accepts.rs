@@ -19,7 +19,7 @@ fn mekmachine_container_accepts(
         }
         return;
     }
-    if !crate::game::Game::mek_is_machine(&entity.id) {
+    if !crate::game::Game::mek_is_machine(&entity.id) && entity.id != crate::game::chem::OXIDIZER {
         return;
     }
     let side_is_input = face.is_none_or(|face| {

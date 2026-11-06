@@ -5,3 +5,7 @@ pub mod heat_generator;
 pub mod recipe_machine;
 pub mod split;
 pub mod transfer;
+pub mod chemical;
+pub mod gui_layout;
+pub mod transmitter_draw;
+pub mod transmitter_model;

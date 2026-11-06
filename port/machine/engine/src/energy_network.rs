@@ -62,7 +62,7 @@ mod reference {
             buffer: 0,
             capacity: CABLE_CAPACITY,
         };
-        let mut chamber = Machine {
+        let mut chamber: Machine = Machine {
             input: Some(Stack::new("iron_ore", 8)),
             ..Machine::default()
         };
