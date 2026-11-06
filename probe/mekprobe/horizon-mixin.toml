@@ -1,0 +1,10 @@
+# Phase 0 probe: a ticking block whose count must survive save and load.
+[mod]
+id = "mekprobe"
+version = "0.1.0"
+
+[compatibility]
+horizon_revision = "f319701e8c9ab657ff562250b3ba07b2d654e3bc"
+
+[api]
+path = "api"

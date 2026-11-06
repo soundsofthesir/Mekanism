@@ -1,25 +1,26 @@
 # Plan: port Mekanism to Horizon
 
-Status: not started. The scope decision below is open.
+Status: Phase 0 passed on 2026-11-06. Phase 1 is in progress.
 
 ## Source and target
 
 - **Source:** Mekanism 10.8.0 for Minecraft 26.3 and NeoForge, commit `ff721ff39f`. It is MIT licensed, so a port must keep its copyright notice. `upstream/` holds a clone for reference and git ignores it. To recreate it, run `git clone https://github.com/mekanism/mekanism upstream`.
-- **Target:** [Horizon](https://github.com/horizon-rust/horizon), a Rust rewrite of Minecraft 26.3. These findings come from revision `baa379d`.
+- **Target:** [Horizon](https://github.com/horizon-rust/horizon), a Rust rewrite of Minecraft 26.3. The findings below come from Nightly `f319701` (2026-11-05, hook API 409), which replaced the first survey at `baa379d`. Main gained 13,707 commits in the week between `baa379d` and the 2026-11-06 head.
 
 ## Findings
 
 - Java code doesn't run in Horizon, so all of the mod's code needs rewriting. That is about 209k lines to port, including 39k of client code. Datagen, integrations and tests are another 45k.
 - `horizon-port-pack` carries over data, assets, worldgen and basic block and item definitions.
-- Horizon has no mod API for ticking block entities, menus, energy, item and fluid transfer, or custom recipe types. API 0.4 would add them, but it is a draft (#1189), and the roadmap says the code-mods path hasn't started.
-- WebAssembly mods are ruled out because that runtime is due for removal.
-- Native mods are the only route. They are experimental, unsandboxed and compiled into a separate game build.
+- Native mods now document hooks for ticking and saved block entities (API 15), item slots (16), menus and screens (17, 19), custom recipe types (36), client sync (45), fluid tanks (54), block entity drawing (71) and energy buffers (142). Phase 0 ran the block entity hooks. The others are documented but untested here.
+- API 0.4 won't arrive: #1189 closed on 2026-10-31 because main removed WebAssembly mods in favour of native ones.
+- Native mods are the only route. They are unsandboxed and compiled into a separate game build. The launcher builds them only with `--trust-native-code`, which the docs say an agent must not supply.
+- Dedicated servers run native mods through a standalone export (`native-build --server-output`).
 
 ## Phases
 
 | # | Work | Done when | Complexity |
 |---|---|---|---|
-| 0 | Read #1189 and test the riskiest part with a native mod | A ticking block keeps its state through save and load, in single player and on a dedicated server | Medium, go/no-go |
+| 0 | Test the riskiest part with a native mod (`probe/`) | A ticking block keeps its state through save and load, in single player and on a dedicated server | Medium, go/no-go |
 | 1 | Run `horizon-port-pack` on a Mekanism jar | Ores generate; items, simple blocks and ordinary crafting recipes work | Low |
 | 2 | Build the machine layer: block entities, menus and screens, energy, item and fluid transfer, client sync | A furnace matches vanilla tick for tick | High |
 | 3 | Build one working chain: recipe engine, Heat Generator, Universal Cable, Energy Cube, Enrichment Chamber, Crusher, Energized Smelter | Ore to doubled ingots on cable power, with progress, energy and saved state matching Java | High |
@@ -28,15 +29,24 @@ Status: not started. The scope decision below is open.
 | 6 | Digital Miner, teleporter, logistics, QIO, Robit, MekaSuit and its 32 modules | Each passes its own comparison test | Very high |
 | 7 | Generators (including fission and fusion), Additions, Tools | Each module passes its tests | High |
 
+## Phase 0 result
+
+`probe/run_phase0.py` passed in single player and on a dedicated server, on Nightly `f319701` with a `dev` build:
+
+- The block counted 102 ticks over 102 game ticks, before the restart and after it.
+- The count was 205-206 at the last read before the stop and 214-229 at the first read after the start. A 24-second run can't reach those values from a reset.
+- A first build took 4 min 32 s on this 8GB Mac.
+
+The test reads the count with the game running, so it can't catch the loss of a few ticks at the save. It covers one saved number in a force-loaded chunk. It doesn't cover items, menus, client sync, or a player next to the block. Phase 2's NBT comparison has to cover those.
+
 ## Testing
 
 Each machine is compared against the Java mod in a fixture world: output, energy and progress per tick, menu values, and NBT after reload. Horizon's `docs/modpacks.md` sets out this method.
 
 ## Risks
 
-- **High, API overlap.** API 0.4 could replace the machine layer in Phase 2. Keeping Mekanism logic separate from the Horizon integration limits the rewrite.
-- **High, Horizon updates.** Mixins pin the mod to one Horizon revision, so each update may need rework. Stay on one revision and update on purpose.
-- **High, Phase 0 could fail.** Nobody has confirmed that mixins can reach the server and world code cleanly. If they can't, the choices are a Horizon fork or waiting for API 0.4.
+- **High, Horizon updates.** A native mod pins one Horizon commit, and the code changes quickly. Stay on one revision and update on purpose. Named hook contracts don't change, so prefer them to mixins.
+- **High, untested hooks.** Phase 0 ran only the block entity hooks. If a later hook doesn't hold up, the fallback is a Horizon fork.
 - **Medium, bot compatibility.** Added blocks and items may break `horizon-companion`, which reads vanilla data and pins its protocol version. Its soak runs should stay on an unmodded server.
 - **Medium, rendering.** Mekanism's custom renderers may need draw access that Horizon's hooks don't offer yet.
 - **Low, dropped integrations.** The first version leaves out the 15k lines of integrations, such as other mods' APIs, and the mod's in-game config screens.
@@ -49,29 +59,30 @@ These figures are modelled, not measured, and could be off by a factor of 2 to 3
 |---|---|---|---|
 | 0: Feasibility test | 1k | 5-15 | 5-20M |
 | 1: Static content | 2k | 5-15 | 10-30M |
-| 2: Machine layer | 15-25k | 40-90 | 80-250M |
+| 2: Machine layer | 3-8k | 8-30 | 15-80M |
 | 3: Working chain | 8-12k | 25-50 | 40-120M |
 | 4: Cables, chemicals, machines | 60-70k | 110-240 | 170-600M |
 | 5: Multiblocks | 12-18k | 30-70 | 40-150M |
 | 6: Miner, logistics, MekaSuit | 35-45k | 70-160 | 100-400M |
 | 7: Generators, Additions, Tools | 15-20k | 30-70 | 40-150M |
-| **Total** | **150-190k** | **315-710** | **0.5-1.7B** |
-| **Phases 0-3 only** | **26-40k** | **75-170** | **135-420M** |
+| **Total** | **135-175k** | **285-650** | **0.45-1.5B** |
+| **Phases 0-3 only** | **14-23k** | **43-110** | **70-250M** |
 
-With three parallel agents from Phase 4, the whole port takes 170 to 390 hours of elapsed time. At about 8 hours a day that is 4 to 10 weeks, before usage limits and review time.
+With three parallel agents from Phase 4, the whole port takes 140 to 325 hours of elapsed time. At about 8 hours a day that is 4 to 8 weeks, before usage limits and review time.
 
 About 6-20M of the tokens would be output. The rest is input, roughly 90% of it cache reads.
 
 Assumptions:
 
-- Rust comes to about 70-90% of the 209k Java lines, including the new machine layer.
+- Rust comes to about 70-90% of the 209k Java lines, including the machine layer.
+- Phase 2 is now an adapter over Horizon's hooks, 3-8k lines instead of 15-25k, at the same hours and tokens per line. This is a judgement, not a measurement. Later phases keep their old figures, though the hooks may reduce them too.
 - Each finished line takes about 3 written lines, at about 12 tokens a line.
 - Each 1,000 finished lines take about 3M input tokens: around 40 turns at 80k of context.
 - A verified, tested port produces about 250-500 finished lines per agent-hour.
 - Three parallel agents do the work of about 2.5.
 
-The biggest unknowns are Horizon build times and memory use, the Phase 0 outcome, and the work to build the Java comparison tests. After Phase 3, replace these assumptions with the measured tokens per line and lines per hour, then re-estimate Phases 4 to 7.
+The biggest unknowns are incremental build times, how far the untested hooks hold up, and the work to build the Java comparison tests. After Phase 3, replace these assumptions with the measured tokens per line and lines per hour, then re-estimate Phases 4 to 7.
 
-## Open decision
+## Scope
 
-Scope: Phases 0 to 3 only (recommended), the full port, or wait for API 0.4.
+Phases 0 to 3, decided on 2026-11-06. After Phase 3, replace the assumptions above with measured rates and decide on Phases 4 to 7.
