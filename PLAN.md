@@ -1,6 +1,6 @@
 # Plan: port Mekanism to Horizon
 
-Status: Phases 0, 1 and 2 passed on 2026-11-06. Phase 3 is next.
+Status: Phases 0, 1 and 2 passed on 2026-11-06. Phase 3 is in progress: the Java reference works on Tower.
 
 ## Source and target
 
@@ -86,6 +86,15 @@ Known gaps:
 A block entity is out of the world during its own tick, so Horizon's energy and fluid helpers answer 0 for it. A machine offers to its neighbour and subtracts what was taken (`port/machine/engine/src/transfer.rs`). A cable or pipe holds nothing, so the helpers' moves between its two neighbours work.
 
 Builds on this 8GB Mac: 4 min 32 s for the first and 2 min 7 s for a mod change, in the `dev` profile.
+
+## Java reference
+
+`port/java_server.py` runs the real Mekanism jar on a NeoForge 26.3 server on Tower and reads machines over RCON with `tick freeze`, `tick step 1` and `data get block`. An Enrichment Chamber traced for 420 consecutive ticks: 5 energy a tick, 200 ticks a recipe, 2 dust per ore.
+
+- The jar is built on Tower (`./gradlew jar`, 20 minutes, needs about 6GB of memory). It holds the main module only, so the Heat Generator, in the generators module, needs another build.
+- A server with no players stops ticking after 60 seconds unless `pause-when-empty-seconds` is off.
+- `tick step` returns before the tick runs, so a read must wait for game time to move.
+- A machine placed with `setblock` has every side set to `NONE` and takes nothing. The trace sets its side config, items and energy in the `setblock`. Whether a player's placement differs is unchecked.
 
 ## Testing
 
