@@ -437,11 +437,18 @@ impl Game<'_> {
 
     fn mek_write_cable(&mut self, pos: [i32; 3], energy: i64) {
         let key = (pos[0], pos[1], pos[2]);
+        let mut seen_change = false;
         if let Some(horizon_client::containers::BlockEntity::Mod(entity)) =
             self.world.block_entities.get_mut(&key)
         {
+            let before = energy_of(&entity.nbt);
             entity.nbt.insert(JavaString::from("energy"), Tag::Long(energy));
             self.world.modified.insert((key.0 >> 4, key.2 >> 4));
+            // `MekanismUtils.scaleChanged`: clients hear of a change of 1% of the capacity or more.
+            seen_change = before * 100 / CABLE_CAPACITY != energy * 100 / CABLE_CAPACITY;
+        }
+        if seen_change {
+            self.native_block_entity_sync(pos);
         }
     }
 

@@ -79,7 +79,9 @@ impl Game<'_> {
         rect.v0 += src[1] * dv;
         rect.u1 = rect.u0 + src[2] * du;
         rect.v1 = rect.v0 + src[3] * dv;
-        batch.rect_uv(dst[0], dst[1], dst[2], dst[3], rect, tint);
+        // `rect_uv` takes its colour as RGBA8 bytes, low byte first, and these are 0xAARRGGBB.
+        let [a, r, g, b] = tint.to_be_bytes();
+        batch.rect_uv(dst[0], dst[1], dst[2], dst[3], rect, u32::from_le_bytes([r, g, b, a]));
     }
 
     /// `GuiSpriteScaling.Tile`, repeating the source part across `dst`.
@@ -137,11 +139,7 @@ impl Game<'_> {
     /// `GuiInsetElement`: a tinted holder, its button and the icon on it.
     fn gui_tab(&self, batch: &mut HudBatch, origin: [f32; 2], tab: [f32; 2], icon: &str, tint: u32) {
         let [x, y] = [origin[0] + tab[0], origin[1] + tab[1]];
-        let holder = if tab[0] < 0.0 || tab[0] < origin[0] && tab[0] < layout::WINDOW[0] {
-            "holder_left"
-        } else {
-            "holder_right"
-        };
+        let holder = if tab[0] < 0.0 { "holder_left" } else { "holder_right" };
         self.gui_nine(batch, holder, [26.0, 9.0], 4.0, [x, y, layout::TAB_SIZE, layout::TAB_SIZE], tint);
         let [bx, by] = layout::tab_button_at(tab);
         let button = [origin[0] + bx, origin[1] + by, layout::TAB_BUTTON, layout::TAB_BUTTON];
@@ -184,7 +182,7 @@ impl Game<'_> {
         if get(mek::DATA_PROGRESS) > 0 && total > 0 {
             let share = (get(mek::DATA_PROGRESS) as f32 / total as f32).min(1.0);
             // `calculateProgressSize`: the bar's inside, with at least a pixel showing.
-            let filled = ((pw - 2.0) * share).floor().max(1.0);
+            let filled = (share * (pw - 3.0)).ceil() + 1.0;
             self.gui_part(batch, "progress/bar/full", [1.0, 0.0, filled, ph], [ox + px + 1.0, oy + py, filled, ph], WHITE);
         }
 
@@ -192,9 +190,9 @@ impl Game<'_> {
         self.gui_nine(batch, "bar/base", [5.0, 5.0], 1.0, [ox + bx, oy + by, bw, bh], WHITE);
         let capacity = get(mek::DATA_CAPACITY).max(1);
         let level = (get(mek::DATA_ENERGY) as f64 / f64::from(capacity)).min(1.0);
-        // `GuiBar.calculateSize`: round up so any charge shows.
-        let filled = ((bh - 2.0) as f64 * level).ceil() as f32;
-        if filled > 0.0 {
+        if level > 0.0 {
+            // `GuiBar.calculateSize`.
+            let filled = (level * f64::from(bh - 3.0)).ceil() as f32 + 1.0;
             let dst = [ox + bx + 1.0, oy + by + bh - 1.0 - filled, bw - 2.0, filled];
             self.gui_tile(batch, "bar/vertical_power", [0.0, 0.0, 2.0, 2.0], dst, WHITE);
         }

@@ -13,6 +13,20 @@ fn mekmachine_screen(block: &str, screen: &mut Option<horizon_client::mod_api::N
         });
         return;
     }
+    if block == crate::game::chem::OXIDIZER {
+        // A plain screen at `TileEntityChemicalOxidizer`'s slot positions, with the energy slot and
+        // the slot that drains the tank left out until what they use is ported.
+        *screen = Some(horizon_client::mod_api::NativeScreen {
+            width: 176.0,
+            height: 166.0,
+            slots: vec![Some([26.0, 36.0]), None, None],
+            inventory_y: 84.0,
+            inventory_x: 8.0,
+            own_labels: false,
+            own_background: false,
+        });
+        return;
+    }
     if !crate::game::Game::mek_is_machine(block) {
         return;
     }

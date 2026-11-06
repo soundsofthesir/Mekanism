@@ -4,7 +4,7 @@
     python3 port/run_tests.py --list
     python3 port/run_tests.py --all
     python3 port/run_tests.py chain menu machines:dedicated
-    python3 port/run_tests.py --changed [GIT_REF]
+    python3 port/run_tests.py --changed [GIT_REF] [--dry-run]
 
 A group is `name` for all its modes, or `name:single` or `name:dedicated` for one. `--changed` picks
 the groups for the files that differ from GIT_REF (default HEAD), including uncommitted ones. A
@@ -34,6 +34,14 @@ GROUPS = {
     "machines": ("test_phase3.py", (SINGLE, DEDICATED), []),
     "menu": ("test_menu.py", (SINGLE,), ["--screenshot", str(WORK / "menu.png")]),
     "generator": ("test_generator.py", (SINGLE,), ["--screenshot", str(WORK / "generator.png")]),
+    "gui": ("test_gui.py", (SINGLE,), [
+        "--art", str(ROOT / "upstream/src/main/resources/assets/mekanism/textures/gui/sprites"),
+        "--screenshot", str(WORK / "gui.png"),
+    ]),
+    "cable_look": ("test_cable_look.py", (SINGLE,), [
+        "--art", str(ROOT / "upstream/src/main/resources/assets/mekanism/textures"),
+        "--screenshot", str(WORK / "cable.png"),
+    ]),
     "chain": ("test_chain.py", (SINGLE, DEDICATED), []),
     "chemical": ("test_chemical.py", (SINGLE, DEDICATED), []),
 }
@@ -75,8 +83,17 @@ RULES = [
     ("port/machine/engine/src/energy_network.rs", ["chain"]),
     ("port/machine/engine/src/split.rs", ["chain"]),
     ("port/machine/networks.rs", ["chain"]),
-    ("port/machine/screen*.rs", ["menu", "generator"]),
-    ("port/machine/menu_button.rs", ["menu"]),
+    ("port/test_cable_look.py", ["cable_look"]),
+    ("port/gen_transmitter_model.py", ["cable_look"]),
+    ("port/machine/cable_draw.rs", ["cable_look"]),
+    ("port/machine/update_tag.rs", ["cable_look"]),
+    ("port/machine/engine/src/transmitter_*.rs", ["cable_look"]),
+    ("port/test_gui.py", ["gui"]),
+    ("port/png_tools.py", ["gui"]),
+    ("port/machine/gui.rs", ["gui", "menu"]),
+    ("port/machine/engine/src/gui_layout.rs", ["gui", "menu"]),
+    ("port/machine/screen*.rs", ["menu", "generator", "gui"]),
+    ("port/machine/menu_button.rs", ["menu", "gui"]),
 ]
 
 
@@ -140,6 +157,7 @@ def main() -> int:
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--changed", nargs="?", const="HEAD", metavar="GIT_REF")
+    parser.add_argument("--dry-run", action="store_true", help="only say which groups would run")
     args = parser.parse_args()
     if args.list:
         for name, (script, modes, _) in GROUPS.items():
@@ -154,6 +172,9 @@ def main() -> int:
     elif not selection:
         parser.error("name groups, or use --all, --changed or --list")
     runs = expand(selection)
+    if args.dry_run:
+        print(" ".join(f"{name}:{mode}" for name, mode in runs))
+        return 0
     failed = 0
     with RESULTS.open("w") as out:
         started = time.monotonic()
