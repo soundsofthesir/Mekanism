@@ -164,16 +164,18 @@ Group times, each mode, before the change below: chain 1,025 s, chemical 325 s, 
 
 ### Next steps
 
-Every item of the batch of 2026-11-07 below is done. In order, what's left of the transport and machine layer:
+The batch of 2026-11-07's stale engine guard, reload work and failure evidence are done, and so is the Osmium Compressor. In order, what's left:
 
-1. Connection modes and redstone on transmitters, and pulling from a block: tube and pipe `pull` rates (`TubeTier`, `PipeTier`) are copied nowhere yet. `CableTier` has none.
-2. Chemical item slots and the oxidizer's drain slot, once a chemical item is ported. Real Fluid Tank and Chemical Tank items and screens.
-3. Creative tiers of the cube and tanks: no capacity fits `i32`, so they need a `Long` in the block's data and three data slots, and their own rule for never draining.
-4. The heat generator's real screen and the transporter and security tabs, which are drawn but inert.
-5. The next machines. A machine like the oxidizer shares `Machine<Output>`, `fill_menu`, the upgrade window and the side window, so each should cost mostly its recording and screen.
+1. The recipe machines, each with its real screen, one recording of normal running and one edge case at least, compared in both modes. Next: Combiner, Precision Sawmill, Purification Chamber, Chemical Injection Chamber, Metallurgic Infuser. Then Chemical Infuser, Chemical Washer, Chemical Crystallizer, Chemical Dissolution Chamber, Rotary Condensentrator, Electrolytic Separator, Pressurized Reaction Chamber. See "Osmium Compressor" for what a machine with a tank needs. A recipe's item and chemical inputs are in `item_input` and `chemical_input`. Purification and Injection set `useStatisticalMechanics`, so their chemical use is random (`StatUtils.inversePoisson`) and rows can only be compared within a bound. Sawmill recipes have a chance output, which is random too. Chemical inputs named by a `#` tag need tag reading: `native_recipe_chemical_matches` and `advanced.rs` read only a chemical's id. Block names are repeated in many `match` arms in `mek.rs`, `container.rs`, `energy.rs`, `blocks.rs`, `screen.rs` and `gui.rs`, and a table would make each machine cheaper.
+2. Connection modes and redstone on transmitters, and pulling from a block: tube and pipe `pull` rates (`TubeTier`, `PipeTier`) are copied nowhere yet. `CableTier` has none.
+3. Chemical item slots and the oxidizer's drain slot, once a chemical item is ported. Real Fluid Tank and Chemical Tank items and screens.
+4. Creative tiers of the cube and tanks: no capacity fits `i32`, so they need a `Long` in the block's data and three data slots, and their own rule for never draining.
+5. The heat generator's real screen and the transporter and security tabs, which are drawn but inert.
 
 Rules for a fresh worker:
 
+- `port/.work/check/carry` holds the carried content, and `add_machine_content.py` must run again after a machine is added to it, or the game has no menu for the machine. `cargo` isn't on the path: use the launcher's, in `~/Library/Application Support/horizon-launcher/rust/*/bin`.
+- A `data` command on a machine rebuilds its block entity and clears `data`, including the recalculated mark. Empty a slot by `item replace`.
 - `/give` has no parser for a mod's item component, though a chest's data and `item replace ... from block` keep it. `test_upgrades.py` uses that.
 - A test that interacts just after a `setblock` must wait first: the client gets the block a little later, and `interact` answers "no face ... is visible".
 - `horizon_driver` writes no `options.txt`. A test that reads the top right of a screen writes `tutorialStep:none`, or the tutorial's toast covers it.
@@ -203,7 +205,7 @@ Full run on this work, `--all` after a rebuild: 22 of 23 runs passed in 886 s (1
 Known differences this batch leaves:
 
 - Upgrades: no sneak-use on a machine to install, no chemical, muffling or other kinds, no "supported" row or effect line in the window, and the window's list can't scroll (two kinds fit). The upgrade item has no icon, because Horizon lacks `mekanism:component_item`. Its slot's frame overlaps an inventory slot by 3 pixels, so a press on the frame's left edge takes the inventory slot. The window hides slot tooltips under it. The saved format is the container's slots 3 and 4, not `component_upgrade.items`.
-- Saved machines: see "Saved machines through a reload". The port's data has a `mek_recalculated` key that the real mod's hasn't, and a chunk unloading doesn't clear it, only a new process does.
+- Saved machines: see "Saved machines through a reload".
 - Ejecting: `eject_delay` and `upgrade_ticks` are saved, where the real mod's reset on a reload. A cube's item eject button stays in the side window, where the real mod has `setCanEject(false)`, though it does nothing.
 - Energy slots: a player can place an empty tablet, which the real slot refuses. The tag `c:dusts/redstone` is reduced to redstone and a block of it in the slot's placement rule, though the recipes run from the real tag.
 - Tiers: no creative tier. Tubes and pipes have no pull. Cables of other tiers draw from their own textures, but only the basic one's look was checked by test. Each pipe and tube still has the plain model.
@@ -275,9 +277,30 @@ So it is not shown to be the mod's fault, and no change was made for it. `run_te
 
 The runner gives each run a `port/.work/run-...` folder for the tests' folders. It stops anything left in them and removes them when it ends, including on SIGTERM, and clears any `tmp...` and `run-...` left by earlier runs when it starts. A process is identified by its arguments, or by its working directory or an open file in the folder, because macOS hides most processes' environments from `ps`. `port/test_run_tests.py` tests all of this with stand-ins and no game. A real launch was checked with an engine that exits at once (exit 75), and SIGTERM to the runner during a chain run left no process or folder. (The batch of 2026-11-07's later work renamed this outcome "launch failure". See "Stale engine guard and failure evidence".) A real segfault hasn't gone through this path, since none recurred. On a dedicated server the supervisor may restart a crashed engine, which would then show as a plain failure rather than a launch crash; that is unverified.
 
+### Osmium Compressor
+
+`port/java_reference_advanced.py` records 14 scenarios of `TileEntityOsmiumCompressor` and `port/test_advanced.py` replays them in both modes with every field compared. `machine/engine/src/advanced.rs` and `machine/advanced.rs` hold the machine, and `port/test_compressor_screen.py` checks its screen in the way the oxidizer's is checked: art at the source's positions, progress, chemical bar, power bar, tooltips, the secondary slot by clicks and the side window.
+
+From the recordings:
+
+- 200 ticks, 15 FE and 1 mB a tick, so a tank of 210 runs a dust and 10 ticks more. An empty tank pauses with progress kept. A wrong chemical or no recipe resets.
+- With 4 speed upgrades a recipe takes 63 ticks and uses 200 mB by `constantUse`: 3 a tick, rising to 4 near the end. A tank with less than a tick's use pauses, so 1 mB left stays there.
+- An ingot gives its 200 mB only when all of it fits (`compressor_ingot_exact_fit`), before the recipe runs in the same tick.
+- A placed compressor with no energy upgrades holds 60 FE.
+
+Breaks that failed: usage 15 to 14 (`compressor_normal` tick 1); `constantUse` rounding up (`compressor_speed4` tick 1); a conversion ignoring room (`compressor_ingot` tick 2); running on a tank with less than a tick's use (`compressor_speed4` tick 67). Tank capacity 210 to 200 passed at first, because every recording set the tank by command. I added `compressor_ingot_exact_fit`, which fails it at tick 2. Screen breaks that failed: osmium tint's bytes swapped (`chemical bar at 150`, 9 rows); secondary slot a pixel off (2 pixels); energy slot a pixel off (50 pixels); secondary slot taking anything (`dirt refused`). The engine's own 2 tests hold the recorded normal and speed runs.
+
+Known differences: one recipe type, `mekanism:compressing`, with all of its recipes `per_tick_usage`. The tank takes chemical only from a conversion recipe, not from a tube, since no recording covers one and `TUBE_JOINS` leaves it out, and no chemical item works in its slot. Its side window has items, chemicals and energy, but the item kinds have no extra side, so a hopper reaches the secondary slot by an input side. `menu_slot_rules` allows only an osmium ingot and block in the secondary slot, where the real mod reads tags. Removing a dust and then adding one back resets `used_so_far` here, which I neither read in the source nor recorded, so it may differ. Its screen shows no warnings or recipe viewer, like the others.
+
+Recipes: the carried data here holds 1,675 recipes of Mekanism's own types, counting both mods, not the 1,718 this plan quoted before, and I can't say where that figure came from. 491 now do something: crushing 255, enriching 205, oxidizing 25, compressing 2, energy conversion 2, and the 2 osmium chemical conversions. The other 22 chemical conversions are unused so far. Types that still do nothing: painting 288, pigment extracting 275, sawing 157, injecting 109, combining 106, mek data 38, metallurgic infusing 31, purifying 28, dissolution 23, nucleosynthesizing 23, rotary 20, pigment mixing 16, reaction 14, crystallizing 10, washing 7, chemical infusing 5, separating 3, activating 2, centrifuging 2, evaporating 2, bin extract 1, bin insert 1, clear configuration 1.
+
+Cost: 22 tool rounds counted from the transcript, from the first read of its source to writing this, without the 7 rounds of the chunk unload work that interrupted it. About 12 of them were reading and writing the shape of a machine with a tank for the first time, before the first build. It's above the model's 8 to 15 turns for a medium unit, and a machine that reuses this one should cost less, but that isn't measured because no second one was added. Rust added: 139 lines in `machine/advanced.rs`, 168 in the engine's `advanced.rs` with its tests, and about 165 across the existing files. Python: 126 for the recorder, 119 for the replay and 203 for the screen test.
+
+Full run on this work, `--all` after the guard's build: 28 of 28 runs passed in 1,105 s, with no launch failure. `port/.work/machine-export/source-hash` and the engine's bytes named this source. New groups: `reload` 29 s and 22 s, `advanced` 52 s and 29 s, `compressor_screen` 37 s.
+
 ### Saved machines through a reload
 
-This plan used to say the real mod always writes `component_upgrade`, so a fresh machine reloads holding 1,000 where the port stayed at 20. That was wrong, and came from reading `serialize` without a recording. `port/java_reference_reload.py` records 8 scenarios through a real server restart, and `port/test_reload.py` replays them in both modes, every field of every row:
+This plan used to say the real mod always writes `component_upgrade`, so a fresh machine reloads holding 1,000 where the port stayed at 20. That was wrong, and came from reading `serialize` without a recording. `port/java_reference_reload.py` records 8 scenarios through a real server restart and 3 through a real chunk unload, and `port/test_reload.py` replays them in both modes, every field of every row:
 
 | Machine before the restart | Key saved | Holds after reload |
 |---|---|---|
@@ -287,16 +310,21 @@ This plan used to say the real mod always writes `component_upgrade`, so a fresh
 | None installed, 2 upgrades in the output slot | Yes | 1,000 |
 | The same, with the slot then emptied | No | 20 |
 | The same with no reload at all (`live_output_emptied`) | No | 1,000 |
+| Emptied, through a chunk unload (`unload_output_emptied`) | No | 20 |
+| 2 in the output slot, through a chunk unload | Yes | 1,000 |
+| Fresh with 15 FE, through a chunk unload | No | 20 |
 
 So the real rule is that the key is saved only if something is installed or in an upgrade slot, and a machine's capacity follows its upgrades only after a recalculation in this load.
 
 `chain_after_reload` passed because this path had no difference. Its chamber and smelter are fresh machines, and in all 901 rows, with a cube supplying them after the restart, neither holds more than 20. Port and recording agreed, and no check needed fixing. Making the port hold 1,000 on any fresh machine fails `chain` at `network_split` tick 1 and `reload` at `reload_fresh_empty` tick 1.
 
-The port did differ elsewhere. It treated the key's presence as the rule, so a machine with everything uninstalled stayed at 1,000 through a reload. Now capacity follows its upgrades if any are installed, or if a mark says this process has recalculated. An install, an uninstall or an item in either upgrade slot sets the mark, which holds the process's id, so a reload ignores it. The key goes when nothing is under it, as in the real mod.
+The port did differ elsewhere. It treated the key's presence as the rule, so a machine with everything uninstalled stayed at 1,000 through a reload. Now capacity follows its upgrades if any are installed, or if a mark says the block has recalculated since it loaded. An install, an uninstall or an item in either upgrade slot sets the mark. It lives in the block entity's `data`, one value past what a menu sends. Horizon doesn't save `data` and rebuilds it empty in `decode_mod_block_entity`, so the mark goes on any load, as the real mod's in-memory state does. The key goes when nothing is under it, as in the real mod.
 
-Breaks: the mark outlasting a reload fails `reload_output_emptied` tick 1 (got 1,000); slots not recalculating fails `reload_output_slot` tick 1 (got 20); the key kept after uninstalling all passed `upgrades` at first, so `test_upgrades` now uninstalls all and fails with `no saved upgrades once all are uninstalled`.
+An earlier version held the process id in the saved data. That survived a chunk unload, which the recording shows is wrong: rebuilt that way, the port fails `unload_output_emptied` tick 1 in both modes (got 1,000, expected 20) while every `reload_*` row passes. The test checks that a read answers "not loaded" before it loads the chunk again, on both sides.
 
-Known differences: the port learns of a slot's item in its first tick, where the real mod does as it loads. `test_reload` allows for that with one tick before its first row, with nothing supplying the machines. The real mod saves the slots under `component_upgrade.items`, and the port as container slots 3 and 4, so the test's `component` column reads either. A player re-entering a single-player world in one process, or a chunk unloading, doesn't reset the mark. Neither is recorded.
+Breaks: not carrying the mark from tick to tick fails `reload_output_slot` tick 1 (got 20); slots not recalculating failed the same row on the earlier version, and the mark outlasting a reload failed `reload_output_emptied` tick 1 (got 1,000); the key kept after uninstalling all passed `upgrades` at first, so `test_upgrades` now uninstalls all and fails with `no saved upgrades once all are uninstalled`.
+
+Known differences: the port learns of a slot's item in its first tick, where the real mod does as it loads. `test_reload` allows for that with one tick before its first row, with nothing supplying the machines. The real mod saves the slots under `component_upgrade.items`, and the port as container slots 3 and 4, so the test's `component` column reads either. A `data` command on a machine rebuilds its block entity here, which clears the mark, where the real mod keeps the capacity, so the test empties the slot by `item replace`. Re-entering a single-player world isn't recorded, since the real mod needs a Java client for that. It goes through the same decode here.
 
 ### Stale engine guard and failure evidence
 

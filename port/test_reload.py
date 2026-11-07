@@ -9,6 +9,7 @@ real mod's `component_upgrade` would hold: an installed upgrade, or an item in o
 import argparse
 import re
 import sys
+import time
 from pathlib import Path
 
 import java_reference_features as features
@@ -25,7 +26,7 @@ OUTPUT_SLOT = re.compile(
     r'component_upgrade:\{items:\[\{container:1b,stored:\{amount:(\d+)L,type:\{id:"mekanism:upgrade",components:\{([^}]*)\}\}\}\}\]\},'
 )
 # The change that empties the output slot, in this port's format.
-EMPTY_SLOT = "data remove block {at} Items[0]"
+EMPTY_SLOT = "item replace block {at} container.4 with minecraft:air"
 
 
 def here_block(block: str) -> str:
@@ -82,6 +83,55 @@ def compare(name: str, got: list[str], wanted: list[str], failures: list[str]) -
         failures.append(f"{name} tick {wanted[0]}: got {got} expected {wanted}")
 
 
+def unload_chunk(world, failures: list[str]) -> None:
+    """Far from any player, so removing the force load really does unload the chunk."""
+    x, z = java.UNLOAD_AT
+    world.command(f"forceload add {x} {z}")
+    wait_loaded(world, x, z, True)
+    wanted = {scenario.name: expected(scenario.name) for scenario in java.UNLOAD_SCENARIOS}
+    for index, scenario in enumerate(java.UNLOAD_SCENARIOS):
+        at_z = z + index * 4
+        answer = " ".join(world.command(f"setblock {x} {Y} {at_z} {here_block(scenario.block)}"))
+        if "Changed" not in answer:
+            raise TestFailure(f"{scenario.name}: setblock answered {answer}")
+    # A tick for this port to learn of the slots. It's unfrozen here, so wait for one to pass.
+    before = world.command("time query gametime")
+    while world.command("time query gametime") == before:
+        pass
+    for index, scenario in enumerate(java.UNLOAD_SCENARIOS):
+        if scenario.change:
+            world.command(EMPTY_SLOT.format(at=f"{x} {Y} {z + index * 4}"))
+    for index, scenario in enumerate(java.UNLOAD_SCENARIOS):
+        compare(scenario.name, row(world, -1, x, z + index * 4), wanted[scenario.name][0], failures)
+    world.command(f"forceload remove {x} {z}")
+    wait_loaded(world, x, z, False)
+    time.sleep(java.UNLOADED_SECONDS)
+    world.command(f"forceload add {x} {z}")
+    wait_loaded(world, x, z, True)
+    freeze(world)
+    for index, scenario in enumerate(java.UNLOAD_SCENARIOS):
+        at_z = z + index * 4
+        compare(scenario.name, row(world, 0, x, at_z), wanted[scenario.name][1], failures)
+        world.command(f"setblock {x + 1} {Y} {at_z} {test_features.here_format(features.CUBE_FULL)}")
+    for tick in range(1, java.TICKS + 1):
+        test_features.step(world)
+        for index, scenario in enumerate(java.UNLOAD_SCENARIOS):
+            compare(scenario.name, row(world, tick, x, z + index * 4), wanted[scenario.name][tick + 1], failures)
+    unfreeze(world)
+    world.command(f"forceload remove {x} {z}")
+
+
+def wait_loaded(world, x: int, z: int, wanted: bool) -> None:
+    deadline = time.monotonic() + java.LOAD_TIMEOUT_SECONDS
+    while True:
+        answer = " ".join(world.command(f"data get block {x} {Y} {z}"))
+        if ("not loaded" not in answer) == wanted:
+            return
+        if time.monotonic() > deadline:
+            raise TestFailure(f"{x} {z} never became {'loaded' if wanted else 'unloaded'}: {answer[:120]}")
+        time.sleep(0.5)
+
+
 def run(world) -> None:
     world.start()
     world.command("forceload add 0 0 0 31")
@@ -124,8 +174,9 @@ def run(world) -> None:
         test_features.step(world)
         compare(java.LIVE.name, row(world, tick, x, z), live[tick], failures)
     unfreeze(world)
+    unload_chunk(world, failures)
     world.stop()
-    print(f"  {len(java.SCENARIOS) + 1} scenarios: {'differs' if failures else 'match'}", flush=True)
+    print(f"  {len(java.SCENARIOS) + len(java.UNLOAD_SCENARIOS) + 1} scenarios: {'differs' if failures else 'match'}", flush=True)
     if failures:
         raise TestFailure("\n".join(failures[:12]))
 

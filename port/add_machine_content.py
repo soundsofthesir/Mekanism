@@ -13,6 +13,9 @@ MACHINES = ("enrichment_chamber", "crusher", "energized_smelter")
 OXIDIZER = "chemical_oxidizer"
 # Input, output, energy item, upgrade input, upgrade output. The output slots only give.
 MACHINE_MENU = {"slots": 5, "data_slots": 17, "results": [1, 4]}
+COMPRESSOR = "osmium_compressor"
+# As the machines, then the secondary slot.
+COMPRESSOR_MENU = {"slots": 6, "data_slots": 17, "results": [1, 4]}
 OXIDIZER_MENU = {"slots": 5, "data_slots": 17, "results": [1, 4]}
 # Discharge and charge. Same data slots as the machines, which share the screen's code.
 CUBE_MENU = {"slots": 2, "data_slots": 17}
@@ -28,6 +31,7 @@ CABLE_JOINS = (
     "mekanism:enrichment_chamber",
     "mekanism:crusher",
     "mekanism:energized_smelter",
+    "mekanism:osmium_compressor",
     "mekanismgenerators:heat_generator",
 )
 CABLE_PARTICLE = "mekanism:block/models/multipart/basic_universal_cable"
@@ -127,6 +131,7 @@ def main() -> int:
     generators.mkdir(parents=True, exist_ok=True)
     (generators / "heat_generator.json").write_text(json.dumps(GENERATOR_MENU))
     (menus / f"{OXIDIZER}.json").write_text(json.dumps(OXIDIZER_MENU))
+    (menus / f"{COMPRESSOR}.json").write_text(json.dumps(COMPRESSOR_MENU))
     (Path(sys.argv[1]) / f"data/mekanism/horizon/block/{OXIDIZER}.json").unlink(missing_ok=True)
     for tier in TIERS:
         (menus / f"{tier}_energy_cube.json").write_text(json.dumps(CUBE_MENU))

@@ -2,12 +2,15 @@
 """Records machines through a real save and reload from the real mod into `port/reference/`.
 
     python3 port/java_reference_reload.py
+    python3 port/java_reference_reload.py unload
 
 Needs `java_server.py`'s server running on Tower, which it restarts. Each scenario places a machine
 with no supply, so nothing changes in the unknown number of ticks around the restart. Row -1 is the
 machine before the restart and row 0 is as the restart left it. A full cube then goes beside it, and
 one row a tick after that shows what the machine now holds. `live_output_emptied` has the same rows
-with no restart, to compare what an emptied machine holds before a reload.
+with no restart, to compare what an emptied machine holds before a reload. `unload` needs no restart:
+it places machines far from anything, removes the chunk's force load, waits until a read says the
+position isn't loaded, loads it again and has the same rows.
 """
 
 import sys
@@ -70,6 +73,16 @@ def live(rcon: java_server.Rcon) -> list[list[str]]:
     return rows
 
 
+UNLOAD_AT = (1024, 1024)
+UNLOAD_SCENARIOS = (
+    Scenario("unload_output_emptied", SCENARIOS[-1].block, SCENARIOS[-1].change),
+    Scenario("unload_output_slot", SCENARIOS[-2].block),
+    Scenario("unload_fresh_energy", machine(energy=15)),
+)
+LOAD_TIMEOUT_SECONDS = 120
+UNLOADED_SECONDS = 5
+
+
 def at(index: int) -> tuple[int, int]:
     """Each scenario's machine, far enough apart that no two touch."""
     return 0, index * 4
@@ -91,8 +104,61 @@ def row(rcon: java_server.Rcon, tick: int, x: int, z: int) -> list[str]:
     ]
 
 
+def wait_loaded(rcon: java_server.Rcon, x: int, z: int, wanted: bool) -> None:
+    deadline = time.monotonic() + LOAD_TIMEOUT_SECONDS
+    while ("has the following" in rcon.command(f"data get block {x} {Y} {z}")) != wanted:
+        if time.monotonic() > deadline:
+            raise SystemExit(f"{x} {z} never became {'loaded' if wanted else 'unloaded'}")
+        time.sleep(0.5)
+
+
+def unload(rcon: java_server.Rcon) -> None:
+    """Unfrozen until the rows start, because a frozen server doesn't unload what it holds."""
+    x, z = UNLOAD_AT
+    rcon.command("tick unfreeze")
+    rcon.command(f"forceload add {x} {z}")
+    time.sleep(SAVE_SECONDS)
+    rows: dict[str, list[list[str]]] = {}
+    for index, scenario in enumerate(UNLOAD_SCENARIOS):
+        at_z = z + index * 4
+        rcon.command(f"setblock {x + 1} {Y} {at_z} air")
+        rcon.command(f"setblock {x} {Y} {at_z} air")
+        answer = rcon.command(f"setblock {x} {Y} {at_z} {scenario.block}")
+        if "Changed" not in answer:
+            raise SystemExit(f"{scenario.name}: setblock answered {answer}")
+        if scenario.change:
+            rcon.command(scenario.change.format(at=f"{x} {Y} {at_z}"))
+        rows[scenario.name] = [row(rcon, -1, x, at_z)]
+    rcon.command(f"forceload remove {x} {z}")
+    wait_loaded(rcon, x, z, False)
+    time.sleep(UNLOADED_SECONDS)
+    rcon.command(f"forceload add {x} {z}")
+    wait_loaded(rcon, x, z, True)
+    rcon.command("tick freeze")
+    for index, scenario in enumerate(UNLOAD_SCENARIOS):
+        at_z = z + index * 4
+        rows[scenario.name].append(row(rcon, 0, x, at_z))
+        rcon.command(f"setblock {x + 1} {Y} {at_z} {CUBE_FULL}")
+    for tick in range(1, TICKS + 1):
+        java_server.step(rcon)
+        for index, scenario in enumerate(UNLOAD_SCENARIOS):
+            rows[scenario.name].append(row(rcon, tick, x, z + index * 4))
+    rcon.command("tick unfreeze")
+    rcon.command(f"forceload remove {x} {z}")
+    for name, table in rows.items():
+        lines = ["\t".join(HEADER), *("\t".join(each) for each in table)]
+        (OUT / f"{name}.tsv").write_text("\n".join(lines) + "\n")
+        print(name, *(lines[i].replace("\t", " ") + " |" for i in (1, 2, 3, -1)), flush=True)
+
+
 def main() -> int:
     rcon, tunnel = java_server.connect()
+    if sys.argv[1:] == ["unload"]:
+        try:
+            unload(rcon)
+        finally:
+            tunnel.terminate()
+        return 0
     tables: dict[str, list[list[str]]] = {}
     try:
         rcon.command("forceload add 0 0 0 31")

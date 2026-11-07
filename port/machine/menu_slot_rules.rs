@@ -9,7 +9,8 @@ fn mekmachine_menu_slot_rules(
 ) {
     const ENERGY_SLOT: usize = 2;
     const UPGRADE_INPUT: usize = 3;
-    const MACHINES: [&str; 4] = [
+    const MACHINES: [&str; 5] = [
+        "mekanism:osmium_compressor",
         "mekanism:enrichment_chamber",
         "mekanism:crusher",
         "mekanism:energized_smelter",
@@ -28,6 +29,11 @@ fn mekmachine_menu_slot_rules(
     if slot == ENERGY_SLOT {
         // `EnergyInventorySlot.canFillOrConvert`, for the only energy item and conversions ported.
         *may_place = matches!(&*stack.item, "mekanism:energy_tablet" | "minecraft:redstone" | "minecraft:redstone_block");
+        return;
+    }
+    if menu == "mekanism:osmium_compressor" && slot == 5 {
+        // `ChemicalInventorySlot.fillOrConvert`, with what `#c:ingots/osmium` and its block's tag hold.
+        *may_place = matches!(&*stack.item, "mekanism:ingot_osmium" | "mekanism:block_osmium");
         return;
     }
     if slot != UPGRADE_INPUT {

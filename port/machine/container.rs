@@ -13,6 +13,19 @@ fn mekmachine_container(block: &str, container: &mut Option<horizon_client::cont
         });
         return;
     }
+    if block == crate::game::mek::COMPRESSOR {
+        use crate::game::mek::{ADVANCED_SECONDARY, ADVANCED_SLOTS, ENERGY_SLOT};
+        const INPUT: usize = 0;
+        const OUTPUT: usize = 1;
+        *container = Some(horizon_client::containers::ModContainer {
+            slots: ADVANCED_SLOTS,
+            faces: std::array::from_fn(|_| vec![INPUT, OUTPUT, ENERGY_SLOT, ADVANCED_SECONDARY]),
+            inputs: vec![INPUT, ENERGY_SLOT, ADVANCED_SECONDARY],
+            outputs: vec![OUTPUT],
+            menu: Some(block.to_owned()),
+        });
+        return;
+    }
     if crate::game::mek::is_cube(block) {
         use crate::game::mek::{CUBE_CHARGE, CUBE_DISCHARGE, CUBE_SLOTS};
         *container = Some(horizon_client::containers::ModContainer {
