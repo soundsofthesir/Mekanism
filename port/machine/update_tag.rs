@@ -4,7 +4,7 @@ fn mekmachine_update_tag(
     tag: &mut Option<horizon_world::nbt::Compound>,
 ) {
     use horizon_world::nbt::{Compound, JavaString, Tag};
-    if entity.id != crate::game::mek::CABLE {
+    if !crate::game::mek::is_cable(&entity.id) {
         return;
     }
     let mut sent = Compound::new();

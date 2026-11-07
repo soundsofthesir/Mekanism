@@ -7,4 +7,5 @@ fn mekmachine_screen_post(
         return;
     }
     game.gui_side_window(batch);
+    game.gui_upgrade_window(batch, screen.mouse);
 }

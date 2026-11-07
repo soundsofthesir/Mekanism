@@ -13,7 +13,7 @@ fn mekmachine_machines(
 
     const INPUT: usize = 0;
     const OUTPUT: usize = 1;
-    const SLOTS: usize = 3;
+    const SLOTS: usize = crate::game::mek::MACHINE_SLOTS;
     const VANILLA_SMELTING: &str = "minecraft:smelting";
 
     let (kind, usage) = match entity.id.as_str() {
@@ -97,17 +97,23 @@ fn mekmachine_machines(
             (_, None) => *slot = None,
         }
     }
-    let int = |key: &str| match entity.nbt.get(&JavaString::from(key)) {
-        Some(Tag::Int(value)) => *value,
-        _ => 0,
-    };
+    fn int(nbt: &horizon_world::nbt::Compound, key: &str) -> i32 {
+        match nbt.get(&JavaString::from(key)) {
+            Some(Tag::Int(value)) => *value,
+            _ => 0,
+        }
+    }
 
+    game.mek_tick_upgrades(entity);
+    // A machine ejects before its recipe runs, so a result leaves on a later tick.
+    game.mek_eject_items(pos, entity, OUTPUT);
+    game.mek_fill_energy_slot(entity, crate::game::mek::ENERGY_SLOT, i64::MAX);
     let mut machine = Machine {
         input: stack(entity.items.get(INPUT)),
         output: stack(entity.items.get(OUTPUT)),
-        energy: i64::from(int("energy")),
-        progress: int("progress"),
-        active: int("active_state") != 0,
+        energy: i64::from(int(&entity.nbt, "energy")),
+        progress: int(&entity.nbt, "progress"),
+        active: int(&entity.nbt, "active_state") != 0,
         recipe: match entity.nbt.get(&JavaString::from("recipe")) {
             Some(Tag::String(id)) => Some(id.to_string_lossy()),
             _ => None,
@@ -137,11 +143,12 @@ fn mekmachine_machines(
     let item_sides = mek::pack_sides(&fields.nbt, mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE);
     let energy_sides = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
     let mut data = vec![0; mek::DATA_SLOTS];
-    data[mek::DATA_USING] = if machine.active { energy_per_tick as i32 } else { 0 };
+    let capacity = upgrades.capacity(usage, mekmachine_engine::recipe_machine::TICKS_REQUIRED);
+    let using = if machine.active { energy_per_tick } else { 0 };
+    let capacity = crate::game::Game::mek_upgraded_capacity(&fields.id, &fields.nbt).unwrap_or(capacity);
+    mek::fill_menu(&mut data, &fields.nbt, machine.energy, capacity, using);
     data[mek::DATA_PROGRESS] = machine.progress;
     data[mek::DATA_TICKS] = ticks;
-    data[mek::DATA_ENERGY] = machine.energy as i32;
-    data[mek::DATA_CAPACITY] = upgrades.capacity(usage, mekmachine_engine::recipe_machine::TICKS_REQUIRED) as i32;
     data[mek::DATA_ITEM_SIDES] = item_sides;
     data[mek::DATA_ENERGY_SIDES] = energy_sides;
     fields.data = data;

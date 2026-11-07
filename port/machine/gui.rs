@@ -4,6 +4,7 @@ use super::Game;
 use super::chem;
 use super::mek;
 use horizon_client::hud::HudBatch;
+use horizon_client::items::ItemStack;
 use mekmachine_engine::gui_layout as layout;
 use std::cell::{Cell, RefCell};
 
@@ -31,6 +32,8 @@ const SULFUR_DIOXIDE_TINT: u32 = 0xFFA9_9D90;
 /// `FluidDeferredRegister.LIQUID`, copied where the atlas looks, and its tile.
 const LIQUID_SPRITE: &str = "mekanism:block/port_liquid";
 const LIQUID_TILE: f32 = 16.0;
+/// `MekanismRenderer.energyIcon`, copied where the atlas looks.
+const ENERGY_SPRITE: &str = "mekanism:block/port_energy";
 
 thread_local! {
     /// The kind the open side config window shows. The window is the client's own, as in the real mod.
@@ -41,6 +44,64 @@ thread_local! {
     static ORIGIN: Cell<[f32; 2]> = const { Cell::new([0.0, 0.0]) };
     /// The menu's data slots, from the last draw, for the window drawn after the items.
     static DATA: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
+    /// Whether the upgrade window is open, and the kind its list has selected.
+    static UPGRADES_OPEN: Cell<bool> = const { Cell::new(false) };
+    static SELECTED_UPGRADE: Cell<Option<usize>> = const { Cell::new(None) };
+    /// Whether the open screen is a cube's, whose sides cycle differently.
+    static CUBE: Cell<bool> = const { Cell::new(false) };
+    /// What the upgrade window's slots hold and the cursor carries, from the frame's start. The
+    /// window draws over items, so it draws these again.
+    static WINDOW_ITEMS: RefCell<([Option<ItemStack>; 2], Option<ItemStack>)> =
+        const { RefCell::new(([None, None], None)) };
+}
+
+pub(crate) fn upgrades_open() -> bool {
+    UPGRADES_OPEN.get()
+}
+
+pub(crate) fn set_upgrades_open(open: bool) {
+    UPGRADES_OPEN.set(open);
+    SELECTED_UPGRADE.set(None);
+}
+
+pub(crate) fn selected_upgrade() -> Option<usize> {
+    SELECTED_UPGRADE.get()
+}
+
+pub(crate) fn select_upgrade(kind: usize) {
+    SELECTED_UPGRADE.set(Some(kind));
+}
+
+pub(crate) fn set_window_items(slots: [Option<ItemStack>; 2], carried: Option<ItemStack>) {
+    WINDOW_ITEMS.set((slots, carried));
+}
+
+fn installed_counts() -> [i32; layout::UPGRADE_KINDS] {
+    DATA.with_borrow(|data| {
+        let get = |slot: usize| data.get(slot).copied().unwrap_or(0);
+        [get(mek::DATA_SPEED), get(mek::DATA_ENERGY_UPGRADES)]
+    })
+}
+
+/// The kinds with anything installed, as the list shows them.
+pub(crate) fn installed_kinds() -> Vec<usize> {
+    let counts = installed_counts();
+    (0..layout::UPGRADE_KINDS).filter(|kind| counts[*kind] > 0).collect()
+}
+
+/// A menu value held in two 16-bit data slots.
+fn wide(data: &[i32], low: usize, high: usize) -> i64 {
+    let get = |slot: usize| data.get(slot).copied().unwrap_or(0);
+    mekmachine_engine::upgrades::from_halves(get(low), get(high))
+}
+
+fn control_sprite(data: &[i32]) -> &'static str {
+    match data.get(mek::DATA_CONTROL).copied().unwrap_or(0) {
+        1 => "redstone_control/high",
+        2 => "redstone_control/low",
+        3 => "redstone_control/pulse",
+        _ => "redstone_control/disabled",
+    }
 }
 
 fn sprite(path: &str) -> String {
@@ -169,6 +230,7 @@ impl Game<'_> {
     fn gui_base(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2], kinds: &'static [usize]) {
         ORIGIN.set(origin);
         KINDS.set(kinds);
+        CUBE.set(false);
         DATA.with_borrow_mut(|saved| data.clone_into(saved));
         let [ox, oy] = origin;
         self.gui_panel(batch, [ox, oy, layout::SCREEN_WIDTH, layout::SCREEN_HEIGHT]);
@@ -183,13 +245,19 @@ impl Game<'_> {
     }
 
     fn gui_tabs(&self, batch: &mut HudBatch, origin: [f32; 2]) {
+        self.gui_tab(batch, origin, layout::UPGRADE_TAB, "button/upgrade", TAB_PLAIN);
+        self.gui_tab(batch, origin, layout::XP_TAB, "tab/xp_containment", TAB_XP);
+        self.gui_common_tabs(batch, origin);
+    }
+
+    /// The tabs a block without upgrades has too.
+    fn gui_common_tabs(&self, batch: &mut HudBatch, origin: [f32; 2]) {
         let [ox, oy] = origin;
         self.gui_tab(batch, origin, layout::SIDE_CONFIG_TAB, "button/configuration", TAB_PLAIN);
         self.gui_tab(batch, origin, layout::TRANSPORTER_TAB, "button/transporter_config", TAB_PLAIN);
-        self.gui_tab(batch, origin, layout::UPGRADE_TAB, "button/upgrade", TAB_PLAIN);
         self.gui_tab(batch, origin, layout::SECURITY_TAB, "security/public", TAB_SECURITY);
-        self.gui_tab(batch, origin, layout::XP_TAB, "tab/xp_containment", TAB_XP);
-        self.gui_tab(batch, origin, layout::REDSTONE_TAB, "redstone_control/disabled", TAB_REDSTONE);
+        let icon = DATA.with_borrow(|data| control_sprite(data));
+        self.gui_tab(batch, origin, layout::REDSTONE_TAB, icon, TAB_REDSTONE);
         let [ex, ey] = layout::ENERGY_TAB;
         self.gui_whole(batch, "tab/energy_info", [ox + ex, oy + ey, layout::TAB_SIZE, layout::TAB_SIZE]);
     }
@@ -228,14 +296,35 @@ impl Game<'_> {
 
         let [bx, by, bw, bh] = layout::POWER_BAR;
         self.gui_nine(batch, "bar/base", [5.0, 5.0], 1.0, [ox + bx, oy + by, bw, bh], WHITE);
-        let capacity = get(mek::DATA_CAPACITY).max(1);
-        let level = (get(mek::DATA_ENERGY) as f64 / f64::from(capacity)).min(1.0);
+        let capacity = wide(data, mek::DATA_CAPACITY, mek::DATA_CAPACITY_HIGH).max(1);
+        let level = (wide(data, mek::DATA_ENERGY, mek::DATA_ENERGY_HIGH) as f64 / capacity as f64).min(1.0);
         if level > 0.0 {
             let filled = layout::bar_size(level, bh - 2.0);
             let dst = [ox + bx + 1.0, oy + by + bh - 1.0 - filled, bw - 2.0, filled];
             self.gui_tile(batch, "bar/vertical_power", [0.0, 0.0, 2.0, 2.0], dst, WHITE);
         }
         self.gui_tabs(batch, origin);
+        self.gui_labels(batch, origin, layout::TITLE_Y);
+    }
+
+    /// `GuiEnergyCube`.
+    pub(crate) fn gui_cube(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2]) {
+        self.gui_base(batch, data, origin, layout::ELECTRIC_KINDS);
+        CUBE.set(true);
+        let [ox, oy] = origin;
+        for (slot, path) in layout::CUBE_SLOTS.into_iter().zip(["slot/input", "slot/output"]) {
+            self.gui_whole(batch, path, [ox + slot[0] - 1.0, oy + slot[1] - 1.0, 18.0, 18.0]);
+        }
+        let [gx, gy, gw, gh] = layout::CUBE_GAUGE;
+        self.gui_nine(batch, "gauge/normal", [5.0, 5.0], 2.0, [ox + gx, oy + gy, gw, gh], WHITE);
+        let energy = wide(data, mek::DATA_ENERGY, mek::DATA_ENERGY_HIGH);
+        let capacity = wide(data, mek::DATA_CAPACITY, mek::DATA_CAPACITY_HIGH);
+        let level = layout::gauge_level(energy, capacity, (gh - 2.0) as i32) as f32;
+        if level > 0.0 {
+            self.gui_tile_sprite(batch, ENERGY_SPRITE, [ox + gx + 1.0, oy + gy + gh - 1.0 - level, gw - 2.0, level], WHITE);
+        }
+        self.gui_part(batch, "gauge/overlay/wide", [0.0, 0.0, gw - 2.0, gh - 2.0], [ox + gx + 1.0, oy + gy + 1.0, gw - 2.0, gh - 2.0], WHITE);
+        self.gui_common_tabs(batch, origin);
         self.gui_labels(batch, origin, layout::TITLE_Y);
     }
 
@@ -270,8 +359,8 @@ impl Game<'_> {
 
         let [bx, by, bw, bh] = layout::OXIDIZER_POWER_BAR;
         self.gui_nine(batch, "bar/base", [5.0, 5.0], 1.0, [ox + bx, oy + by, bw, bh], WHITE);
-        let energy_capacity = get(mek::DATA_CAPACITY).max(1);
-        let energy = (get(mek::DATA_ENERGY) as f64 / f64::from(energy_capacity)).min(1.0);
+        let energy_capacity = wide(data, mek::DATA_CAPACITY, mek::DATA_CAPACITY_HIGH).max(1);
+        let energy = (wide(data, mek::DATA_ENERGY, mek::DATA_ENERGY_HIGH) as f64 / energy_capacity as f64).min(1.0);
         if energy > 0.0 {
             let filled = layout::bar_size(energy, bw - 2.0);
             self.gui_tile(batch, "bar/horizontal_power", [0.0, 0.0, 2.0, 2.0], [ox + bx + 1.0, oy + by + 1.0, filled, bh - 2.0], WHITE);
@@ -357,6 +446,67 @@ impl Game<'_> {
         }
     }
 
+    /// `GuiUpgradeWindow`, drawn after the items so it covers them, with its own slots' items on top.
+    pub(crate) fn gui_upgrade_window(&self, batch: &mut HudBatch, mouse: [f32; 2]) {
+        if !upgrades_open() {
+            return;
+        }
+        let origin = ORIGIN.get();
+        let [wx, wy, ww, wh] = layout::UPGRADE_WINDOW;
+        let [x, y] = [origin[0] + wx, origin[1] + wy];
+        let at = |[ex, ey, ew, eh]: [f32; 4]| [x + ex, y + ey, ew, eh];
+        self.gui_nine(batch, "shadow", [9.0, 9.0], 3.0, [x - 3.0, y - 3.0, ww + 6.0, wh + 6.0], WHITE);
+        self.gui_panel(batch, [x, y, ww, wh]);
+        let [cx, cy, size] = layout::CLOSE;
+        self.gui_button(batch, [x + cx, y + cy, size, size], WHITE);
+        self.gui_whole_scaled(batch, "button/close", [12.0, 12.0], [x + cx, y + cy, size, size]);
+        self.gui_centred(batch, "Upgrades", x + ww / 2.0, y + 5.0, TEXT_HEADING);
+        self.gui_nine(batch, "element_holder", [16.0, 16.0], 1.0, at(layout::UPGRADE_LIST), WHITE);
+        let counts = installed_counts();
+        let selected = selected_upgrade();
+        let [lx, ly, lw, _] = layout::UPGRADE_LIST;
+        for (row, kind) in installed_kinds().into_iter().enumerate() {
+            let top = y + ly + 1.0 + row as f32 * layout::UPGRADE_ROW_HEIGHT;
+            let art = if selected == Some(kind) { "list/selected" } else { "list/base" };
+            self.gui_nine(batch, art, [12.0, 12.0], 1.0, [x + lx + 1.0, top, lw - 8.0, layout::UPGRADE_ROW_HEIGHT], WHITE);
+            self.native_text(batch, layout::UPGRADE_NAMES[kind], [x + lx + 14.0, top + 2.0], TEXT_TITLE, false);
+        }
+        self.gui_nine(batch, "inner_screen", [256.0, 256.0], 32.0, at(layout::UPGRADE_SCREEN), WHITE);
+        let [sx, sy, _, _] = layout::UPGRADE_SCREEN;
+        if let Some(kind) = selected.filter(|kind| counts[*kind] > 0) {
+            let name = format!("{} Upgrade", layout::UPGRADE_NAMES[kind]);
+            self.native_text(batch, &name, [x + sx + 2.0, y + sy + 2.0], TEXT_SCREEN, false);
+            let amount = format!("Amount: {}/{}", counts[kind], mekmachine_engine::upgrades::MAX_OF_A_KIND);
+            self.native_text(batch, &amount, [x + sx + 2.0, y + sy + 12.0], TEXT_SCREEN, false);
+        } else {
+            self.native_text(batch, "No selection.", [x + sx + 2.0, y + sy + 2.0], TEXT_SCREEN, false);
+        }
+        let [bx, by, bw, bh] = layout::UNINSTALL_BUTTON;
+        self.gui_nine(batch, "button_digital", [3.0, 3.0], 1.0, [x + bx, y + by, bw, bh], WHITE);
+        self.gui_centred(batch, "Uninstall", x + bx + bw / 2.0, y + by + 2.0, TEXT_SCREEN);
+        let [ax, ay, aw, ah] = layout::INSTALLING_ARROW;
+        self.gui_whole(batch, "progress/installing/empty", [x + ax, y + ay, aw, ah]);
+        let ticks = DATA.with_borrow(|data| data.get(mek::DATA_INSTALL_TICKS).copied().unwrap_or(0));
+        if ticks > 0 {
+            let share = ticks as f32 / mekmachine_engine::upgrades::INSTALL_TICKS as f32;
+            let filled = layout::progress_size(share, ah);
+            self.gui_part(batch, "progress/installing/full", [0.0, 0.0, aw, filled], [x + ax, y + ay, aw, filled], WHITE);
+        }
+        self.gui_whole(batch, "progress/uninstalling/empty", at(layout::UNINSTALLING_ARROW));
+        for frame in [layout::UPGRADE_INPUT_FRAME, layout::UPGRADE_OUTPUT_FRAME] {
+            self.gui_whole(batch, "slot/normal", [x + frame[0], y + frame[1], 18.0, 18.0]);
+        }
+        let (slots, carried) = WINDOW_ITEMS.with_borrow(Clone::clone);
+        for (stack, frame) in slots.iter().zip([layout::UPGRADE_INPUT_FRAME, layout::UPGRADE_OUTPUT_FRAME]) {
+            if let Some(stack) = stack {
+                self.draw_item(batch, stack, x + frame[0] + 1.0, y + frame[1] + 1.0);
+            }
+        }
+        if let Some(stack) = carried {
+            self.draw_item(batch, &stack, mouse[0] - 8.0, mouse[1] - 8.0);
+        }
+    }
+
     fn gui_whole_scaled(&self, batch: &mut HudBatch, path: &str, size: [f32; 2], dst: [f32; 4]) {
         self.gui_part(batch, path, [0.0, 0.0, size[0], size[1]], dst, WHITE);
     }
@@ -367,6 +517,9 @@ impl Game<'_> {
             let [x, y] = layout::tab_button_at(tab);
             at[0] >= x && at[0] < x + layout::TAB_BUTTON && at[1] >= y && at[1] < y + layout::TAB_BUTTON
         };
+        if upgrades_open() {
+            return;
+        }
         if let Some(kind) = WINDOW.get() {
             let local = [at[0] - layout::WINDOW[0], at[1] - layout::WINDOW[1]];
             for (index, [x, y]) in layout::SIDE_BUTTONS.into_iter().enumerate() {
@@ -387,14 +540,17 @@ impl Game<'_> {
         }
         let on = |[x, y, w, h]: [f32; 4]| at[0] >= x && at[0] < x + w && at[1] >= y && at[1] < y + h;
         let get = |slot: usize| i64::from(data.get(slot).copied().unwrap_or(0));
-        let (energy, capacity) = (get(mek::DATA_ENERGY), get(mek::DATA_CAPACITY));
+        let (energy, capacity) = (
+            wide(data, mek::DATA_ENERGY, mek::DATA_ENERGY_HIGH),
+            wide(data, mek::DATA_CAPACITY, mek::DATA_CAPACITY_HIGH),
+        );
         let oxidizer = block == chem::OXIDIZER;
         if on(if oxidizer { layout::OXIDIZER_POWER_BAR } else { layout::POWER_BAR }) {
             lines.push(layout::energy_fraction(energy, capacity));
         }
         let [ex, ey] = layout::ENERGY_TAB;
         if on([ex, ey, layout::TAB_SIZE, layout::TAB_SIZE]) {
-            lines.extend(layout::energy_tab_lines(get(mek::DATA_USING), (capacity - energy).max(0)));
+            lines.extend(layout::energy_tab_lines(wide(data, mek::DATA_USING, mek::DATA_USING_HIGH), (capacity - energy).max(0)));
         }
         if oxidizer && on(layout::OXIDIZER_GAUGE) {
             let kind = usize::try_from(get(chem::DATA_CHEMICAL_KIND) - 1).ok();
@@ -425,6 +581,9 @@ fn sides_slot(kind: usize) -> usize {
 /// A side's saved value, from a data slot's 2 bits a side.
 fn side_of(packed: i32, kind: usize, index: usize) -> i32 {
     let position = mek::unpack_side(packed, index);
+    if CUBE.get() {
+        return mek::CUBE_SIDE_CYCLE[position.min(mek::CUBE_SIDE_CYCLE.len() - 1)];
+    }
     match kind {
         layout::ITEM_KIND => mek::ITEM_SIDE_CYCLE[position],
         layout::CHEMICAL_KIND => mek::CHEMICAL_SIDE_CYCLE[position & 1],

@@ -26,6 +26,7 @@ else
         tail -30 port/.work/build.txt | tee port/.work/results.txt
         exit 1
     fi
+    python3 port/prune_server_builds.py
 fi
 [ $# -eq 0 ] && set -- --all
 exec python3 port/run_tests.py "$@"

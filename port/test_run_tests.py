@@ -67,7 +67,24 @@ ACTIONS = {
 }
 
 
+def check_prune() -> None:
+    """Old builds of this mod go, the newest stays, and another mod's build is never touched."""
+    import json
+    import prune_server_builds as prune
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        for at, name, mods in ((1, "old", ["mekmachine"]), (2, "new", ["mekmachine"]), (0, "other", ["somemod"]), (0, "both", ["mekmachine", "somemod"])):
+            folder = root / name
+            folder.mkdir()
+            (folder / "native-mods.json").write_text(json.dumps({"mods": [{"id": mod} for mod in mods]}))
+            os.utime(folder, (1000 + at, 1000 + at))
+        (root / "no_manifest").mkdir()
+        expect("older builds", [folder.name for folder in prune.older_builds(root)], ["old"])
+
+
 def main() -> int:
+    check_prune()
     with tempfile.TemporaryDirectory() as temporary:
         base = Path(temporary).resolve()
         scripts = {}

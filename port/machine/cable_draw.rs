@@ -6,7 +6,7 @@ fn mekmachine_cable_draw(
     entity: &horizon_client::containers::ModBlockEntity,
     draw: &mut crate::game::native_block_entity_draw::BlockEntityDraw,
 ) {
-    if block == crate::game::mek::CABLE {
+    if crate::game::mek::is_cable(block) {
         game.mek_draw_cable(state, entity, draw);
     }
 }

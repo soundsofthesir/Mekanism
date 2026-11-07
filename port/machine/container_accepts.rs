@@ -11,6 +11,17 @@ fn mekmachine_container_accepts(
 ) {
     use crate::game::mek;
     const INPUT: usize = 0;
+    if mek::is_cube(&entity.id) {
+        // `EnergyInventorySlot`: only what it can charge or discharge.
+        let usable = match slot {
+            mek::CUBE_DISCHARGE => matches!(&*stack.item, mek::ENERGY_TABLET | "minecraft:redstone" | "minecraft:redstone_block"),
+            _ => &*stack.item == mek::ENERGY_TABLET,
+        };
+        if !usable {
+            *cancel = true;
+        }
+        return;
+    }
     if entity.id == mek::GENERATOR {
         // `FluidFuelInventorySlot`: only what burns. Its right side is the energy slot's.
         let right = face.is_some_and(|face| mek::relative_index(game.mek_facing(pos), face) == mek::RIGHT_INDEX);
@@ -20,6 +31,25 @@ fn mekmachine_container_accepts(
         return;
     }
     if !crate::game::Game::mek_is_machine(&entity.id) && entity.id != crate::game::chem::OXIDIZER {
+        return;
+    }
+    if slot == mek::UPGRADE_INPUT {
+        // `UpgradeInventorySlot.input`: by hand only, and only what this port's machines support.
+        if face.is_some() || game.mek_upgrade_kind(stack).is_none() {
+            *cancel = true;
+        }
+        return;
+    }
+    if slot == mek::ENERGY_SLOT {
+        // By a side set to energy, and only what `menu_slot_rules` lets a player place.
+        let side_is_energy = face.is_none_or(|face| {
+            let index = mek::relative_index(game.mek_facing(pos), face);
+            mek::side_value(&entity.nbt, mek::ITEM_CONFIG, index) == mek::SIDE_ENERGY
+        });
+        let usable = matches!(&*stack.item, mek::ENERGY_TABLET | "minecraft:redstone" | "minecraft:redstone_block");
+        if !side_is_energy || !usable {
+            *cancel = true;
+        }
         return;
     }
     let side_is_input = face.is_none_or(|face| {

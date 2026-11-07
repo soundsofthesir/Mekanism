@@ -18,6 +18,24 @@ fn mekmachine_blocks(blocks: &mut Vec<horizon_mods::content::Block>) {
             ..Default::default()
         });
     }
+    // The carried content has no Fluid Tank, whose real model is a custom one, so it has no look yet.
+    for tier in mekmachine_engine::tiers::TIERS {
+        blocks.push(horizon_mods::content::Block {
+            id: format!("mekanism:{tier}_fluid_tank"),
+            template: "minecraft:glass".into(),
+            item: true,
+            ..Default::default()
+        });
+    }
+    // A cube opens a menu like a furnace too, so the mod declares it and the carried one goes.
+    for tier in mekmachine_engine::tiers::TIERS {
+        blocks.push(horizon_mods::content::Block {
+            id: format!("mekanism:{tier}_energy_cube"),
+            template: "minecraft:furnace".into(),
+            item: true,
+            ..Default::default()
+        });
+    }
     blocks.push(horizon_mods::content::Block {
         id: crate::game::chem::OXIDIZER.into(),
         template: "minecraft:furnace".into(),

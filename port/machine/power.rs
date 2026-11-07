@@ -29,9 +29,11 @@ fn mekmachine_power(
         nbt.insert(JavaString::from("fluids"), Tag::List(vec![Tag::Compound(tank)]));
     }
 
-    match entity.id.as_str() {
-        mek::CABLE => game.mek_register_cable(pos),
-        mek::CUBE => {
+    let id = entity.id.clone();
+    match id.as_str() {
+        cable if mek::is_cable(cable) => game.mek_register_cable(pos),
+        cube if mek::is_cube(cube) => {
+            let rate = mek::cube_rate(cube);
             let saved = &entity.nbt;
             let ejects = matches!(
                 saved.get(&JavaString::from("component_config")),
@@ -41,19 +43,30 @@ fn mekmachine_power(
                 )
             );
             let held = mek::energy_of(saved);
-            if !ejects || held <= 0 {
-                return;
+            // `setCanEject(_ -> canFunction())`.
+            if ejects && held > 0 && game.mek_may_run(pos, saved) {
+                let facing = game.mek_facing(pos);
+                let sides: Vec<_> = mek::DIRECTIONS
+                    .into_iter()
+                    .filter(|side| {
+                        let index = mek::relative_index(facing, *side);
+                        mek::side_value(saved, mek::ENERGY_CONFIG, index) == mek::SIDE_OUTPUT
+                    })
+                    .collect();
+                let sent = game.mek_emit(pos, &sides, held.min(rate));
+                entity.nbt.insert(JavaString::from("energy"), Tag::Int((held - sent) as i32));
             }
-            let facing = game.mek_facing(pos);
-            let sides: Vec<_> = mek::DIRECTIONS
-                .into_iter()
-                .filter(|side| {
-                    let index = mek::relative_index(facing, *side);
-                    mek::side_value(saved, mek::ENERGY_CONFIG, index) == mek::SIDE_OUTPUT
-                })
-                .collect();
-            let sent = game.mek_emit(pos, &sides, held.min(i64::from(mek::CUBE_RATE)));
-            entity.nbt.insert(JavaString::from("energy"), Tag::Int((held - sent) as i32));
+            // `TileEntityEnergyCube.onUpdateServer`, each limited to the tier's rate.
+            entity.items.resize(mek::CUBE_SLOTS, None);
+            game.mek_charge_slot(entity, mek::CUBE_CHARGE, rate);
+            game.mek_fill_energy_slot(entity, mek::CUBE_DISCHARGE, rate);
+            let capacity = mek::cube_capacity(cube).unwrap_or(0);
+            let energy = mek::energy_of(&entity.nbt);
+            let mut data = vec![0; mek::DATA_SLOTS];
+            mek::fill_menu(&mut data, &entity.nbt, energy, capacity, 0);
+            data[mek::DATA_ITEM_SIDES] = mek::pack_sides(&entity.nbt, mek::ITEM_CONFIG, &mek::CUBE_SIDE_CYCLE);
+            data[mek::DATA_ENERGY_SIDES] = mek::pack_sides(&entity.nbt, mek::ENERGY_CONFIG, &mek::CUBE_SIDE_CYCLE);
+            entity.data = data;
         }
         mek::GENERATOR => {
             let here = game.mek_ambient(pos);

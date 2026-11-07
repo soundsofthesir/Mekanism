@@ -22,6 +22,9 @@ from test_phase3 import step  # noqa: E402
 HERE = Path(__file__).resolve().parent
 WORK = HERE / ".work"
 REFERENCE = HERE / "reference"
+# A frozen game takes one command a tick, so a high rate saves time, and a step still moves one tick.
+NORMAL_TICK_RATE = 20
+MAX_FPS = 260
 FIELD_COUNT = len(java.FIELDS)
 CHEM_FIELD = java.FIELDS.index("chem")
 TANKS = r'chemical_tanks: \[\{container: 0b, stored: \{amount: (\d+)L, type: "([^"]+)"\}\}\]'
@@ -78,11 +81,13 @@ def normalised(row: str, tubes: list[int]) -> list[str]:
 
 
 def place(world, scenario) -> None:
+    world.command(f"tick rate {NORMAL_TICK_RATE}")
     world.command("tick unfreeze")
     for x in range(8):
         world.command(f"setblock {x} {java.Y} 0 air")
     world.command(f"setblock 1 {java.Y + 1} 0 air")
     world.command("tick freeze")
+    world.command(f"tick rate {world.FAST_TICK_RATE}")
     for x, block in enumerate(scenario.blocks):
         answer = " ".join(world.command(f"setblock {x} {java.Y} 0 {to_horizon(block)}"))
         if "Changed" not in answer:
@@ -104,11 +109,13 @@ def replay(world, scenario) -> None:
         step(world)
         check(scenario, tick, read_row(world, tick, count), next(expected), tubes)
         if tick == scenario.restart_after:
+            world.command(f"tick rate {NORMAL_TICK_RATE}")
             world.command("tick unfreeze")
             world.stop()
             world.start()
             world.command(f"forceload add 0 0")
             world.command("tick freeze")
+            world.command(f"tick rate {world.FAST_TICK_RATE}")
             check(scenario, -1, read_row(world, -1, count), next(expected), tubes)
     print(f"  {scenario.name}: {len(lines) - 1} rows, matches")
 
@@ -120,10 +127,13 @@ def check(scenario, tick: int, got: str, expected: str, tubes: list[int]) -> Non
 
 def run(world) -> None:
     world.start()
+    if world.has_player:
+        world.ctl("options-set", "maxFps", MAX_FPS)
     world.command("forceload add 0 0")
     begin_checks()
     for scenario in java.SCENARIOS:
         replay(world, scenario)
+    world.command(f"tick rate {NORMAL_TICK_RATE}")
     world.command("tick unfreeze")
     world.stop()
 
