@@ -61,6 +61,7 @@ GROUPS = {
     ]),
     "chain": ("test_chain.py", (SINGLE, DEDICATED), []),
     "chemical": ("test_chemical.py", (SINGLE, DEDICATED), []),
+    "features": ("test_features.py", (SINGLE, DEDICATED), []),
 }
 
 # The first matching rule wins. Paths are relative to the project.
@@ -71,7 +72,11 @@ RULES = [
     ("port/README.md", []),
     ("PLAN.md", []),
     ("port/java_reference_chemical.py", ["chemical"]),
+    ("port/java_reference_features.py", ["features"]),
     ("port/java_*", []),
+    ("port/reference/upgrade_*", ["features"]),
+    ("port/reference/redstone_*", ["features"]),
+    ("port/reference/eject_*", []),
     ("port/reference/oxidizer_*", ["chemical"]),
     ("port/reference/tube_*", ["chemical"]),
     ("port/reference/generator_*", ["generator", "chain"]),
@@ -81,6 +86,7 @@ RULES = [
     ("port/reference/cube_*", ["chain"]),
     ("port/reference/*", ["machines"]),
     ("port/test_chemical.py", ["chemical"]),
+    ("port/test_features.py", ["features"]),
     ("port/test_phase2.py", ["furnace"]),
     ("port/test_transfer.py", ["transfer"]),
     ("port/test_phase3.py", ["machines"]),
