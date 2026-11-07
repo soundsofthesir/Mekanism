@@ -50,6 +50,32 @@ pub fn may_run(control: &str, powered: bool) -> bool {
     }
 }
 
+/// `TileComponentEjector.tickDelay`: an attempt on the first tick, then one every 11 ticks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EjectTimer {
+    pub delay: i32,
+}
+
+/// What one tick of the timer gives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EjectTick {
+    pub delay: i32,
+    pub attempts: bool,
+}
+
+/// `MekanismUtils.TICKS_PER_HALF_SECOND`.
+const EJECT_DELAY: i32 = 10;
+
+impl EjectTimer {
+    pub fn tick(self) -> EjectTick {
+        if self.delay == 0 {
+            EjectTick { delay: EJECT_DELAY, attempts: true }
+        } else {
+            EjectTick { delay: self.delay - 1, attempts: false }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +113,19 @@ mod tests {
         assert!(may_run("high", true) && !may_run("high", false));
         assert!(may_run("low", false) && !may_run("low", true));
         assert!(may_run("disabled", false) && may_run("pulse", false));
+    }
+
+    #[test]
+    fn eject_attempts_on_ticks_1_12_23() {
+        let mut timer = EjectTimer { delay: 0 };
+        let mut attempts = Vec::new();
+        for tick in 1..=23 {
+            let next = timer.tick();
+            if next.attempts {
+                attempts.push(tick);
+            }
+            timer = EjectTimer { delay: next.delay };
+        }
+        assert_eq!(attempts, [1, 12, 23]);
     }
 }

@@ -645,6 +645,41 @@ impl Game<'_> {
         }
     }
 
+    /// `TileComponentEjector.outputItems` for one output slot: a whole stack leaves in one attempt,
+    /// through each side set to output in turn. It ticks whether or not there is anything to send.
+    pub(crate) fn mek_eject_items(
+        &mut self,
+        pos: [i32; 3],
+        entity: &mut horizon_client::containers::ModBlockEntity,
+        slot: usize,
+    ) {
+        use mekmachine_engine::upgrades::EjectTimer;
+        if !is_ejecting(&entity.nbt, ITEM_EJECT) {
+            return;
+        }
+        let key = JavaString::from("eject_delay");
+        let delay = match entity.nbt.get(&key) {
+            Some(Tag::Int(delay)) => *delay,
+            _ => 0,
+        };
+        let timer = EjectTimer { delay }.tick();
+        entity.nbt.insert(key, Tag::Int(timer.delay));
+        if !timer.attempts {
+            return;
+        }
+        let facing = self.mek_facing(pos);
+        for side in DIRECTIONS {
+            if side_value(&entity.nbt, ITEM_CONFIG, relative_index(facing, side)) != SIDE_OUTPUT {
+                continue;
+            }
+            let Some(stack) = entity.items.get_mut(slot).and_then(Option::take) else {
+                return;
+            };
+            let rest = self.mek_insert_item(offset(pos, side), opposite(side), stack);
+            entity.items[slot] = rest;
+        }
+    }
+
     pub(crate) fn mek_is_lava(&self, pos: [i32; 3]) -> bool {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         self.res.facts().get(state).fluid == horizon_client::blocks::Fluid::Lava

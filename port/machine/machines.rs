@@ -97,17 +97,21 @@ fn mekmachine_machines(
             (_, None) => *slot = None,
         }
     }
-    let int = |key: &str| match entity.nbt.get(&JavaString::from(key)) {
-        Some(Tag::Int(value)) => *value,
-        _ => 0,
-    };
+    fn int(nbt: &horizon_world::nbt::Compound, key: &str) -> i32 {
+        match nbt.get(&JavaString::from(key)) {
+            Some(Tag::Int(value)) => *value,
+            _ => 0,
+        }
+    }
 
+    // A machine ejects before its recipe runs, so a result leaves on a later tick.
+    game.mek_eject_items(pos, entity, OUTPUT);
     let mut machine = Machine {
         input: stack(entity.items.get(INPUT)),
         output: stack(entity.items.get(OUTPUT)),
-        energy: i64::from(int("energy")),
-        progress: int("progress"),
-        active: int("active_state") != 0,
+        energy: i64::from(int(&entity.nbt, "energy")),
+        progress: int(&entity.nbt, "progress"),
+        active: int(&entity.nbt, "active_state") != 0,
         recipe: match entity.nbt.get(&JavaString::from("recipe")) {
             Some(Tag::String(id)) => Some(id.to_string_lossy()),
             _ => None,

@@ -286,3 +286,9 @@ bindings = [
   { name = "face", ty = "Option<horizon_core::geometry::Direction>", value = "face" },
   { name = "cancel", ty = "&mut bool", value = "&mut *cancel" },
 ]
+
+[[module]]
+id = "mek_items"
+file = "crates/horizon-client/src/game/machines.rs"
+name = "mek_items"
+source = "mek_items.rs"

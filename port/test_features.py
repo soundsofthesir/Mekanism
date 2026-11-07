@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Replays recordings of upgrades and redstone control from `java_reference_features.py`.
 
-Every field of every row must match, except the chest, which belongs to the item ejecting scenarios.
+Every field of every row must match, including what the chest beside the machine holds.
 """
 
 import argparse
@@ -17,7 +17,7 @@ WORK = HERE / ".work"
 REFERENCE = HERE / "reference"
 Y = 200
 NORMAL_TICK_RATE = 20
-PREFIXES = ("upgrade_", "redstone_")
+PREFIXES = ("upgrade_", "redstone_", "eject_")
 ITEM = re.compile(r'\{container:(\d+)b,stored:\{amount:(\d+)L,type:\{id:"([^"]+)"\}\}\}')
 
 
@@ -41,7 +41,7 @@ def slot_of(nbt: str, slot: int) -> str:
     return "-"
 
 
-def row(world, tick: str) -> list[str]:
+def row(world, tick: str, has_chest: bool) -> list[str]:
     nbt = " ".join(world.command(f"data get block 0 {Y} 0"))
     get = lambda pattern: (re.search(pattern, nbt) or [None, "0"])[1]
     tank = re.search(r"chemical_tanks: \[\{container: 0b, stored: \{amount: (\d+)L", nbt)
@@ -53,6 +53,7 @@ def row(world, tick: str) -> list[str]:
         slot_of(nbt, 0),
         slot_of(nbt, 1),
         tank.group(1) if tank else "0",
+        java.chest_items(" ".join(world.command(f"data get block 1 {Y} 0"))) if has_chest else "-",
     ]
 
 
@@ -78,13 +79,14 @@ def replay(world, scenario: java.Scenario) -> list[str]:
     expected = (REFERENCE / f"{scenario.name}.tsv").read_text().splitlines()
     changes = dict(scenario.changes)
     failures = []
+    has_chest = any("chest" in block for block in scenario.blocks)
     for line in expected[2:]:
-        wanted = line.split("\t")[:7]
+        wanted = line.split("\t")
         tick = int(wanted[0])
         if tick in changes:
             world.command(here_command(changes[tick]))
         step(world)
-        got = row(world, wanted[0])
+        got = row(world, wanted[0], has_chest)
         if got != wanted:
             failures.append(f"{scenario.name} tick {tick}: got {got} expected {wanted}")
             break
