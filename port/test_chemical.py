@@ -10,13 +10,10 @@ a remainder isn't compared: tube shares are compared sorted, and PLAN.md lists t
 
 import argparse
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-from horizon_driver import DedicatedServer, SinglePlayer, TestFailure, install_content
+from horizon_driver import DedicatedServer, SinglePlayer, TestFailure, install_content, begin_checks, run_test
 
 sys.dont_write_bytecode = True
 import java_reference_chemical as java  # noqa: E402
@@ -124,6 +121,7 @@ def check(scenario, tick: int, got: str, expected: str, tubes: list[int]) -> Non
 def run(world) -> None:
     world.start()
     world.command("forceload add 0 0")
+    begin_checks()
     for scenario in java.SCENARIOS:
         replay(world, scenario)
     world.command("tick unfreeze")
@@ -138,21 +136,14 @@ def main() -> int:
     args = parser.parse_args()
     if args.dedicated and not args.eula:
         parser.error("--dedicated writes eula=true: pass --eula if you agree to the Minecraft EULA")
-    folder = Path(tempfile.mkdtemp(dir=WORK))
-    world = (DedicatedServer if args.dedicated else SinglePlayer)(folder, args.engine.resolve(), {})
-    install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
-    try:
-        run(world)
-    except (TestFailure, subprocess.TimeoutExpired) as failure:
-        try:
-            world.stop()
-        except (TestFailure, subprocess.TimeoutExpired):
-            pass
-        print(f"FAIL: {failure}\nFiles kept in {folder}", file=sys.stderr)
-        return 1
-    shutil.rmtree(folder)
-    print("PASS")
-    return 0
+    kind = DedicatedServer if args.dedicated else SinglePlayer
+
+    def make(folder: Path):
+        world = kind(folder, args.engine.resolve(), {})
+        install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
+        return world
+
+    return run_test(make, run)
 
 
 if __name__ == "__main__":

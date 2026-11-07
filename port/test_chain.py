@@ -11,15 +11,12 @@ after the restart prove what was saved.
 
 import argparse
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Callable
 
-from horizon_driver import DedicatedServer, SinglePlayer, TestFailure, install_content
+from horizon_driver import DedicatedServer, SinglePlayer, TestFailure, install_content, begin_checks, run_test
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE / ".work"
@@ -66,6 +63,11 @@ def input_machine(block: str, items: str = "", item_config: str = ALL_IN) -> str
     return f"{block}{{component_config:{{config0:{ALL_IN},config3:{item_config}}}{extra}}}"
 
 
+NORMAL_TICK_RATE = 20
+# A control request waits for a client frame, on top of the server's tick.
+MAX_FPS = 260
+
+
 class Rig:
     def __init__(self, world) -> None:
         self.world = world
@@ -84,10 +86,18 @@ class Rig:
             if time.monotonic() > deadline:
                 raise TestFailure(f"a step did not move game time from {before}")
 
-    def clear(self, box: str) -> None:
-        self.world.command("tick unfreeze")
-        self.world.command(f"fill {box} air")
+    def freeze(self) -> None:
         self.world.command("tick freeze")
+        self.world.command(f"tick rate {self.world.FAST_TICK_RATE}")
+
+    def unfreeze(self) -> None:
+        self.world.command(f"tick rate {NORMAL_TICK_RATE}")
+        self.world.command("tick unfreeze")
+
+    def clear(self, box: str) -> None:
+        self.unfreeze()
+        self.world.command(f"fill {box} air")
+        self.freeze()
 
     def place(self, x: int, y: int, z: int, block: str) -> None:
         answer = self.text(f"setblock {x} {y} {z} {block}")
@@ -245,7 +255,7 @@ def chain_row(rig: Rig) -> tuple:
 
 
 def chain_place(rig: Rig) -> None:
-    rig.world.command("tick unfreeze")
+    rig.unfreeze()
     rig.world.command("forceload add 48 32 63 47")
     time.sleep(CHUNK_SETTLE_SECONDS)
     rig.clear(f"48 {Y - 4} 36 58 {Y + 2} 44")
@@ -265,18 +275,21 @@ def chain_place(rig: Rig) -> None:
 def run(world) -> None:
     rig = Rig(world)
     world.start()
-    world.command("tick unfreeze")
+    if world.has_player:
+        world.ctl("options-set", "maxFps", MAX_FPS)
+    rig.unfreeze()
     world.command("forceload add 0 0 31 15")
     time.sleep(CHUNK_SETTLE_SECONDS)
+    begin_checks()
     failures = []
     for scenario in (network_split, network_remainder, cube_to_cube, generator_to_cube):
         failures += scenario(rig)
     chain_place(rig)
     failures += replay(rig, "chain_before_reload", lambda: chain_row(rig))
-    world.command("tick unfreeze")
+    rig.unfreeze()
     world.stop()
     world.start()
-    world.command("tick freeze")
+    rig.freeze()
     x, y, z = CUBE_AT
 
     def read_after() -> tuple:
@@ -290,7 +303,7 @@ def run(world) -> None:
     print("  chain state after the restart:", "differs" if got != first else "matches", flush=True)
     world.command(f"data modify block {x} {y} {z} energy set value {RESUMED_POWER}")
     failures += replay(rig, "chain_after_reload", read_after)
-    world.command("tick unfreeze")
+    rig.unfreeze()
     world.stop()
     if failures:
         raise TestFailure("\n".join(failures))
@@ -304,22 +317,14 @@ def main() -> int:
     args = parser.parse_args()
     if args.dedicated and not args.eula:
         parser.error("--dedicated writes eula=true: pass --eula if you agree to the Minecraft EULA")
-    folder = Path(tempfile.mkdtemp(dir=WORK))
     kind = DedicatedServer if args.dedicated else SinglePlayer
-    world = kind(folder, args.engine.resolve(), {})
-    install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
-    try:
-        run(world)
-    except (TestFailure, subprocess.TimeoutExpired) as failure:
-        try:
-            world.stop()
-        except (TestFailure, subprocess.TimeoutExpired):
-            pass
-        print(f"FAIL: {failure}\nFiles kept in {folder}", file=sys.stderr)
-        return 1
-    shutil.rmtree(folder)
-    print("PASS")
-    return 0
+
+    def make(folder: Path):
+        world = kind(folder, args.engine.resolve(), {})
+        install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
+        return world
+
+    return run_test(make, run)
 
 
 if __name__ == "__main__":

@@ -160,7 +160,36 @@ Not tested: a client on a dedicated server, and frame time with many cables.
 
 Full run on the slice, `--all` after a clean build: 13 of 14 runs passed in 58 minutes. The 14th, `menu`, stopped when the game crashed while opening its world, before any of the test's checks. It then passed 3 of 3 runs on the same build. The crash is a null `Arc` clone in the `lan_host` closure while it maps `StateFacts`, under `ChunkEncoder::with_signs` (macOS report at 22:20). The cause is unknown. Nothing in `port/machine` names `lan_host` or `ChunkEncoder`, but that doesn't clear the mod, because its blocks are in that state table. It happened once in an estimated 40 launches and may recur in any group. A crash before a test's first check isn't a test failure, but it must be recorded here.
 
-Group times, each mode: chain 1,025 s, chemical 325 s, machines 265 s, generator 83 s, furnace 55 s and 39 s, menu 40 s, cable look 33 s, GUI 24 s, transfer 17 s and 14 s. The chain's two modes are 58% of a full run. A row there takes about 0.6 s, because each read starts a `horizon-ctl` process, so a batched read would save the most time.
+Group times, each mode, before the change below: chain 1,025 s, chemical 325 s, machines 265 s, generator 83 s, furnace 55 s and 39 s, menu 40 s, cable look 33 s, GUI 24 s, transfer 17 s and 14 s.
+
+### The launch crash
+
+The crash above is not explained. What was established, in a 45-minute look at the crash report, Horizon's source at `f319701` and loops of launches:
+
+- The faulting read is `s.name.clone()` in `Game::lan_host`, on the server thread. Its `Arc<str>` field reads as null at a valid heap address, inside `Resources.core.facts.states`. Nothing about the fault points at a thread race on a half-built value: that table is built once in safe code (`horizon-items` has `forbid(unsafe_code)`) and is read-only behind an `Arc` before the server thread starts. So something zeroed live memory or the report's read isn't what it appears to be.
+- `port/machine` contains no `unsafe`, and its frames aren't on the stack. It can't write that memory directly. It could still trigger a bug elsewhere, and this isn't ruled out.
+- Horizon sets mimalloc's purge delay to 0 (`configure_allocator`), which returns freed pages to the system at once. That could explain a page reading as zeros, but this is a guess with no evidence behind it.
+- Launches with the carried content: modded dev build 51, 1 failed; plain Nightly `horizon-client` 50, 0 failed. Without content: 17 and 17, 0 failed. No new macOS crash report appeared, so the one failure wasn't shown to be this crash. It was at launch 75 of the loop, after 9.4 s, and my loop cut its message short, so what it was is unknown. At 1 crash in about 40 launches, 67 plain launches with none would happen by chance about 18% of the time, so they don't clear Horizon or blame the mod.
+- A build of Horizon without the mod in the same `dev` profile wasn't tried, because it needs a full rebuild.
+
+So it is not shown to be the mod's fault, and no change was made for it. `run_tests.py` now records any repeat with the log's tail and the path of the macOS report, which is the way to learn more.
+
+### Test runner
+
+`horizon_driver.run_test` wraps every test. A test calls `begin_checks` just before its first check. If the game has died by then, the test exits with code 75 and `run_tests.py` reports `LAUNCH CRASH`, runs the group once more and records that in the output and the last line. A second crash fails the group. Anything after `begin_checks`, or a failure with the game still alive, is a plain failure and never retried. A group that passes without calling `begin_checks` fails, so a test can't skip the mark.
+
+The runner gives each run a `port/.work/run-...` folder for the tests' folders. It stops anything left in them and removes them when it ends, including on SIGTERM, and clears any `tmp...` and `run-...` left by earlier runs when it starts. A process is identified by its arguments, or by its working directory or an open file in the folder, because macOS hides most processes' environments from `ps`. `port/test_run_tests.py` tests all of this with stand-ins and no game. A real launch was checked with an engine that exits at once (exit 75), and SIGTERM to the runner during a chain run left no process or folder.
+
+### Chain speed
+
+The chain took 1,025 s a mode, and starting `horizon-ctl` wasn't the main cost. A frozen game takes one command a tick, so each read cost 50 ms at 20 ticks a second. Batching over several sockets gave nothing in single player (9 commands, 450 ms) because replies come back one a tick.
+
+- `test_chain` sets `tick rate` high while frozen, and back to 20 before anything unfreezes. A step still moves exactly one tick, as a measured run of 10 steps showed.
+- Commands use one kept connection: the control socket in single player and the HTTP API in dedicated mode.
+- In single player `maxFps` goes to 260, because a control request also waits for a client frame.
+- Dedicated mode caps the rate at 400 a second. At 10,000 the supervisor's new connection per command used up the local ports (os error 49) after about 1,000 rows.
+
+The chain now takes 76 s in single player and 94 s on a dedicated server, against 1,025 s each. It has the same 1,704 rows and the same comparisons. Changing the cube's energy in row 897 of `chain_after_reload.tsv` from 0 to 1 fails both modes with `chain_after_reload tick 897: cube got 0 expected 1`.
 
 ### Cost against the model
 

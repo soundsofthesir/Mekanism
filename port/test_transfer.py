@@ -10,10 +10,7 @@ a reload must find exactly those amounts again.
 """
 
 import argparse
-import shutil
-import subprocess
 import sys
-import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -22,6 +19,8 @@ from typing import NamedTuple
 from horizon_driver import (
     DedicatedServer,
     SinglePlayer,
+    begin_checks,
+    run_test,
     TestFailure,
     run_function,
     write_functions,
@@ -165,6 +164,7 @@ def scenario_run(world, trace: Path) -> None:
     world.start()
     time.sleep(AFTER_RELOAD_SECONDS)
     world.stop()
+    begin_checks()
     first, second = read_trace(trace)
     failures: list[str] = []
     check_first_load(first, failures)
@@ -182,22 +182,13 @@ def main() -> int:
     args = parser.parse_args()
     if args.dedicated and not args.eula:
         parser.error("--dedicated writes eula=true: pass --eula if you agree to the Minecraft EULA")
-    folder = Path(tempfile.mkdtemp(dir=WORK))
-    trace = folder / "trace.txt"
     kind = DedicatedServer if args.dedicated else SinglePlayer
-    world = kind(folder, args.engine.resolve(), {TRACE: trace})
-    try:
-        scenario_run(world, trace)
-    except (TestFailure, subprocess.TimeoutExpired) as failure:
-        try:
-            world.stop()
-        except (TestFailure, subprocess.TimeoutExpired):
-            pass
-        print(f"FAIL: {failure}\nFiles kept in {folder}", file=sys.stderr)
-        return 1
-    shutil.rmtree(folder)
-    print("PASS")
-    return 0
+
+    def make(folder: Path):
+        world = kind(folder, args.engine.resolve(), {TRACE: folder / "trace.txt"})
+        return world
+
+    return run_test(make, lambda world: scenario_run(world, world.folder / "trace.txt"))
 
 
 if __name__ == "__main__":

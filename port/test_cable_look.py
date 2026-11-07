@@ -9,13 +9,11 @@ down view gives the cable's size on screen: the OBJ's cross section is 6 of 16 o
 
 import argparse
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
-from horizon_driver import SinglePlayer, TestFailure, install_content
+from horizon_driver import SinglePlayer, TestFailure, install_content, begin_checks, run_test
 from png_tools import Image
 
 HERE = Path(__file__).resolve().parent
@@ -100,6 +98,7 @@ def run(world, folder: Path, art: Path, screenshot: Path | None) -> None:
     world.command(f"setblock 1 {Y} 0 {CABLE}")
     world.command("tick freeze")
     world.ctl("look", 0, 90)
+    begin_checks()
     plain = picture(world, folder / "joined.png")
     if screenshot:
         shutil.copy(folder / "joined.png", screenshot)
@@ -167,21 +166,16 @@ def main() -> int:
     parser.add_argument("--art", type=Path, required=True)
     parser.add_argument("--screenshot", type=Path)
     args = parser.parse_args()
-    folder = Path(tempfile.mkdtemp(dir=WORK))
-    world = SinglePlayer(folder, args.engine.resolve(), {})
-    install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
-    try:
-        run(world, folder, args.art.resolve(), args.screenshot.resolve() if args.screenshot else None)
-    except (TestFailure, subprocess.TimeoutExpired) as failure:
-        try:
-            world.stop()
-        except (TestFailure, subprocess.TimeoutExpired):
-            pass
-        print(f"FAIL: {failure}\nFiles kept in {folder}", file=sys.stderr)
-        return 1
-    shutil.rmtree(folder)
-    print("PASS")
-    return 0
+    art = args.art.resolve()
+    screenshot = args.screenshot.resolve() if args.screenshot else None
+    kind = SinglePlayer
+
+    def make(folder: Path):
+        world = kind(folder, args.engine.resolve(), {})
+        install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
+        return world
+
+    return run_test(make, lambda world: run(world, world.folder, art, screenshot))
 
 
 if __name__ == "__main__":
