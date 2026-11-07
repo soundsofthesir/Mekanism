@@ -12,8 +12,8 @@ MACHINES = ("enrichment_chamber", "crusher", "energized_smelter")
 # The machine mod registers this block, so the carried definition has to go.
 OXIDIZER = "chemical_oxidizer"
 # Input, output, energy item. The output slot only gives.
-MACHINE_MENU = {"slots": 3, "data_slots": 6, "results": [1]}
-OXIDIZER_MENU = {"slots": 3, "data_slots": 8, "results": [1]}
+MACHINE_MENU = {"slots": 3, "data_slots": 10, "results": [1]}
+OXIDIZER_MENU = {"slots": 3, "data_slots": 10, "results": [1]}
 # The fuel slot. Lava, energy, temperature.
 GENERATOR_MENU = {"slots": 1, "data_slots": 3}
 
@@ -90,6 +90,11 @@ def add_cable_look(carry: Path, upstream: Path) -> None:
     )
     source = upstream / "src/main/resources/assets/mekanism/textures/mek_liquid/energy.png"
     target = carry / "assets/mekanism/textures/block/port_energy.png"
+    target.write_bytes(source.read_bytes())
+    target.with_suffix(".png.mcmeta").write_bytes(source.with_suffix(".png.mcmeta").read_bytes())
+    # The gas a gauge shows, for the same reason.
+    source = upstream / "src/main/resources/assets/mekanism/textures/mek_liquid/liquid.png"
+    target = carry / "assets/mekanism/textures/block/port_liquid.png"
     target.write_bytes(source.read_bytes())
     target.with_suffix(".png.mcmeta").write_bytes(source.with_suffix(".png.mcmeta").read_bytes())
 

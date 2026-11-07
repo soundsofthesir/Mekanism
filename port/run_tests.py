@@ -50,6 +50,11 @@ GROUPS = {
         "--art", str(ROOT / "upstream/src/main/resources/assets/mekanism/textures/gui/sprites"),
         "--screenshot", str(WORK / "gui.png"),
     ]),
+    "oxidizer_screen": ("test_oxidizer_screen.py", (SINGLE,), [
+        "--art", str(ROOT / "upstream/src/main/resources/assets/mekanism/textures/gui/sprites"),
+        "--textures", str(ROOT / "upstream/src/main/resources/assets/mekanism/textures"),
+        "--screenshot", str(WORK / "oxidizer.png"),
+    ]),
     "cable_look": ("test_cable_look.py", (SINGLE,), [
         "--art", str(ROOT / "upstream/src/main/resources/assets/mekanism/textures"),
         "--screenshot", str(WORK / "cable.png"),
@@ -101,12 +106,13 @@ RULES = [
     ("port/machine/cable_draw.rs", ["cable_look"]),
     ("port/machine/update_tag.rs", ["cable_look"]),
     ("port/machine/engine/src/transmitter_*.rs", ["cable_look"]),
-    ("port/test_gui.py", ["gui"]),
-    ("port/png_tools.py", ["gui"]),
-    ("port/machine/gui.rs", ["gui", "menu"]),
-    ("port/machine/engine/src/gui_layout.rs", ["gui", "menu"]),
-    ("port/machine/screen*.rs", ["menu", "generator", "gui"]),
-    ("port/machine/menu_button.rs", ["menu", "gui"]),
+    ("port/test_gui.py", ["gui", "oxidizer_screen"]),
+    ("port/test_oxidizer_screen.py", ["oxidizer_screen"]),
+    ("port/png_tools.py", ["gui", "oxidizer_screen"]),
+    ("port/machine/gui.rs", ["gui", "menu", "oxidizer_screen"]),
+    ("port/machine/engine/src/gui_layout.rs", ["gui", "menu", "oxidizer_screen"]),
+    ("port/machine/screen*.rs", ["menu", "generator", "gui", "oxidizer_screen"]),
+    ("port/machine/menu_button.rs", ["menu", "gui", "oxidizer_screen"]),
 ]
 
 

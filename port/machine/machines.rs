@@ -129,7 +129,8 @@ fn mekmachine_machines(
     use crate::game::mek;
     let item_sides = mek::pack_sides(&fields.nbt, mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE);
     let energy_sides = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
-    let mut data = vec![0; 6];
+    let mut data = vec![0; mek::DATA_SLOTS];
+    data[mek::DATA_USING] = if machine.active { usage as i32 } else { 0 };
     data[mek::DATA_PROGRESS] = machine.progress;
     data[mek::DATA_TICKS] = mekmachine_engine::recipe_machine::TICKS_REQUIRED;
     data[mek::DATA_ENERGY] = machine.energy as i32;

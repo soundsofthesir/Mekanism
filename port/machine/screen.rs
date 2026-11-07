@@ -14,16 +14,17 @@ fn mekmachine_screen(block: &str, screen: &mut Option<horizon_client::mod_api::N
         return;
     }
     if block == crate::game::chem::OXIDIZER {
-        // A plain screen at `TileEntityChemicalOxidizer`'s slot positions, with the energy slot and
-        // the slot that drains the tank left out until what they use is ported.
+        // The energy slot and the slot that drains the tank are drawn, but stay out of the menu
+        // until what they use is ported.
+        let [input, _drain, _energy] = layout::OXIDIZER_SLOTS;
         *screen = Some(horizon_client::mod_api::NativeScreen {
-            width: 176.0,
-            height: 166.0,
-            slots: vec![Some([26.0, 36.0]), None, None],
-            inventory_y: 84.0,
-            inventory_x: 8.0,
-            own_labels: false,
-            own_background: false,
+            width: layout::SCREEN_WIDTH,
+            height: layout::SCREEN_HEIGHT,
+            slots: vec![Some(input), None, None],
+            inventory_y: layout::INVENTORY[1],
+            inventory_x: layout::INVENTORY[0],
+            own_labels: true,
+            own_background: true,
         });
         return;
     }

@@ -11,11 +11,26 @@ use std::{cell::RefCell, collections::HashMap};
 pub(crate) const OXIDIZER: &str = "mekanism:chemical_oxidizer";
 pub(crate) const TUBE: &str = "mekanism:basic_pressurized_tube";
 pub(crate) const TANK: &str = "mekanism:basic_chemical_tank";
+/// `chemical.mekanism.*` in `en_us.json`, for what `oxidizing` recipes make. The menu sends a place
+/// in this list, plus one, because its data slots hold numbers.
+pub(crate) const OXIDIZED: [(&str, &str); 9] = [
+    ("mekanism:sulfur_dioxide", "Sulfur Dioxide"),
+    ("mekanism:brine", "Gaseous Brine"),
+    ("mekanism:lithium", "Lithium"),
+    ("mekanism:tin", "Tin"),
+    ("mekanism:bio", "Biomass"),
+    ("mekanism:carbon", "Carbon"),
+    ("mekanism:diamond", "Diamond"),
+    ("mekanism:redstone", "Redstone"),
+    ("mekanism:refined_obsidian", "Refined Obsidian"),
+];
 /// `TransmissionType.CHEMICAL`'s index.
 pub(crate) const CHEMICAL_CONFIG: &str = "config2";
-/// The oxidizer menu's data slot for what its tank holds, after the shared machine slots.
-pub(crate) const DATA_CHEMICAL: usize = 6;
-const EJECT: &str = "eject2";
+/// The oxidizer menu's data slots for what its tank holds, and its chemical sides.
+pub(crate) const DATA_CHEMICAL: usize = 7;
+pub(crate) const DATA_CHEMICAL_KIND: usize = 8;
+pub(crate) const DATA_CHEMICAL_SIDES: usize = 9;
+pub(crate) const EJECT: &str = "eject2";
 const TANKS_KEY: &str = "chemical_tanks";
 const STORED_KEY: &str = "stored";
 

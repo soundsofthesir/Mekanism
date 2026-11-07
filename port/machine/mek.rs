@@ -110,6 +110,9 @@ pub(crate) const DATA_ENERGY: usize = 2;
 pub(crate) const DATA_CAPACITY: usize = 3;
 pub(crate) const DATA_ITEM_SIDES: usize = 4;
 pub(crate) const DATA_ENERGY_SIDES: usize = 5;
+pub(crate) const DATA_USING: usize = 6;
+/// The menu's data slots, the same for every machine. The oxidizer also fills the chemical ones.
+pub(crate) const DATA_SLOTS: usize = 10;
 /// The data slots of the generator's menu.
 pub(crate) const GENERATOR_DATA_LAVA: usize = 0;
 pub(crate) const GENERATOR_DATA_ENERGY: usize = 1;
@@ -122,6 +125,7 @@ pub(crate) const BUTTONS_PER_ROW: i32 = 6;
 /// The values a side cycles through, in the order `SideConfig` offers them for one-slot machines.
 pub(crate) const ITEM_SIDE_CYCLE: [i32; 4] = [0, SIDE_INPUT, SIDE_OUTPUT, SIDE_ENERGY];
 pub(crate) const ENERGY_SIDE_CYCLE: [i32; 2] = [0, SIDE_INPUT];
+pub(crate) const CHEMICAL_SIDE_CYCLE: [i32; 2] = [0, SIDE_OUTPUT];
 
 /// The bits above a packed side config in a data slot: whether that kind ejects.
 pub(crate) const EJECT_BIT: i32 = 12;
@@ -131,7 +135,11 @@ pub(crate) const ENERGY_EJECT: &str = "eject0";
 
 /// A side config packed into a data slot, 2 bits a side, as an index into its cycle.
 pub(crate) fn pack_sides(nbt: &Compound, config: &str, cycle: &[i32]) -> i32 {
-    let eject = if config == ITEM_CONFIG { ITEM_EJECT } else { ENERGY_EJECT };
+    let eject = match config {
+        ITEM_CONFIG => ITEM_EJECT,
+        super::chem::CHEMICAL_CONFIG => super::chem::EJECT,
+        _ => ENERGY_EJECT,
+    };
     let packed = (0..SIDES).fold(0, |packed, index| {
         let value = side_value(nbt, config, index);
         let position = cycle.iter().position(|v| *v == value).unwrap_or(0) as i32;
@@ -346,6 +354,11 @@ impl Game<'_> {
                 horizon_protocol::packets::play::ContainerButtonClick { container, button },
             ));
         }
+    }
+
+    /// Whether a block uses `gui.rs`'s screen.
+    pub(crate) fn mek_has_machine_screen(block: &str) -> bool {
+        Self::mek_is_machine(block) || block == super::chem::OXIDIZER
     }
 
     pub(crate) fn mek_is_machine(block: &str) -> bool {

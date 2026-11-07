@@ -24,6 +24,93 @@ pub const PROGRESS: [f32; 4] = [86.0, 38.0, 25.0, 9.0];
 pub const POWER_BAR: [f32; 4] = [164.0, 16.0, 6.0, 54.0];
 pub const CHAMBER_SLOTS: [[f32; 2]; 3] = [[64.0, 17.0], [116.0, 35.0], [64.0, 53.0]];
 pub const INVENTORY: [f32; 2] = [8.0, 84.0];
+
+/// `GuiChemicalOxidizer`, and the slots from `TileEntityChemicalOxidizer`: input, drain, energy.
+pub const OXIDIZER_SLOTS: [[f32; 2]; 3] = [[26.0, 36.0], [152.0, 55.0], [152.0, 14.0]];
+pub const OXIDIZER_PROGRESS: [f32; 4] = [64.0, 40.0, 48.0, 8.0];
+/// `GaugeOverlay.STANDARD`'s 16 by 58, with a pixel on each side.
+pub const OXIDIZER_GAUGE: [f32; 4] = [131.0, 13.0, 18.0, 60.0];
+pub const OXIDIZER_POWER_BAR: [f32; 4] = [115.0, 75.0, 54.0, 6.0];
+pub const OXIDIZER_TITLE_Y: f32 = 5.0;
+pub const TITLE_Y: f32 = 6.0;
+
+/// `GuiTankGauge.getScaledLevel`: at least a pixel when anything is held.
+pub fn gauge_level(stored: i64, capacity: i64, inside: i32) -> i32 {
+    if stored <= 0 || capacity <= 0 {
+        return 0;
+    }
+    ((stored as f64 / capacity as f64 * f64::from(inside)).round() as i32).max(1)
+}
+
+/// `GuiBar.calculateSize`, whose result is at least a pixel.
+pub fn bar_size(level: f64, inside: f32) -> f32 {
+    (level * f64::from(inside - 1.0)).ceil() as f32 + 1.0
+}
+
+/// `GuiProgress.calculateProgressSize`.
+pub fn progress_size(share: f32, size: f32) -> f32 {
+    (share * (size - 1.0)).ceil() + 1.0
+}
+
+/// `TextUtils.format` in English, with its grouping.
+pub fn format_number(value: i64) -> String {
+    let digits = value.abs().to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    if value < 0 { format!("-{out}") } else { out }
+}
+
+/// What the energy parts of a screen say, as `EnergyDisplay` with the default compact display.
+pub fn energy_text(value: i64) -> String {
+    const PREFIXES: [(f64, &str); 7] = [
+        (1.0, ""),
+        (1e3, "k"),
+        (1e6, "M"),
+        (1e9, "G"),
+        (1e12, "T"),
+        (1e15, "P"),
+        (1e18, "E"),
+    ];
+    if value == 0 {
+        return "0 FE".to_owned();
+    }
+    let number = value as f64;
+    let (size, prefix) = PREFIXES.iter().rev().find(|(size, _)| number >= *size).copied().unwrap_or(PREFIXES[0]);
+    let rounded = ((number / size) * 100.0).trunc() / 100.0;
+    format!("{} {prefix}FE", trim_number(rounded))
+}
+
+fn trim_number(value: f64) -> String {
+    let text = format!("{value:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// `MekanismLang.GENERIC_FRACTION` of two energies.
+pub fn energy_fraction(stored: i64, capacity: i64) -> String {
+    format!("{}/{}", energy_text(stored), energy_text(capacity))
+}
+
+/// `GuiEnergyTab`'s lines.
+pub fn energy_tab_lines(using: i64, needed: i64) -> Vec<String> {
+    vec![
+        format!("Using: {}/t", energy_text(using)),
+        format!("Needed: {}", energy_text(needed)),
+        "Unit: FE".to_owned(),
+    ]
+}
+
+/// `GuiTankGauge.getContentsTooltips`.
+pub fn gauge_lines(name: Option<&str>, amount: i64) -> Vec<String> {
+    match name {
+        Some(name) if amount > 0 => vec![format!("{name}: {} mB", format_number(amount))],
+        _ => vec!["Empty".to_owned()],
+    }
+}
 pub const HOTBAR_Y: f32 = 142.0;
 
 /// Inside the window, from its top left.
@@ -44,13 +131,17 @@ pub const SIDE_BUTTONS: [[f32; 2]; 6] = [
 /// `TileComponentConfig` lists a machine's kinds as `AttributeSideConfig.ELECTRIC_MACHINE` does.
 pub const ITEM_KIND: usize = 0;
 pub const ENERGY_KIND: usize = 1;
-pub const KINDS: usize = 2;
+pub const CHEMICAL_KIND: usize = 2;
+/// `AttributeSideConfig`: a window's kinds, in tab order.
+pub const ELECTRIC_KINDS: &[usize] = &[ITEM_KIND, ENERGY_KIND];
+pub const OXIDIZER_KINDS: &[usize] = &[ITEM_KIND, CHEMICAL_KIND, ENERGY_KIND];
+const KIND_COUNT: i32 = 3;
 
 /// Menu button ids. A kind's row of six, then the same for right clicks and for shift clicks.
 pub const RIGHT_CLICK_BASE: i32 = 20;
 pub const SHIFT_CLICK_BASE: i32 = 40;
 pub const EJECT_BASE: i32 = 60;
-pub const CLEAR_BASE: i32 = 62;
+pub const CLEAR_BASE: i32 = EJECT_BASE + KIND_COUNT;
 const ROW: i32 = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,9 +184,9 @@ pub fn tab_button_at(tab: [f32; 2]) -> [f32; 2] {
     [tab[0] + border + nudge, tab[1] + border]
 }
 
-/// A side config kind's tab while the window shows another, on the window's left.
-pub fn kind_tab(kind: usize) -> [f32; 2] {
-    [WINDOW[0] - TAB_SIZE, WINDOW[1] + 2.0 + 28.0 * kind as f32]
+/// The tab of a window's kind at this place in its list, on the window's left.
+pub fn kind_tab(place: usize) -> [f32; 2] {
+    [WINDOW[0] - TAB_SIZE, WINDOW[1] + 2.0 + 28.0 * place as f32]
 }
 
 fn on_tab_button(at: [f32; 2], tab: [f32; 2]) -> bool {
@@ -104,7 +195,7 @@ fn on_tab_button(at: [f32; 2], tab: [f32; 2]) -> bool {
 }
 
 /// `window` is the kind the open side config window shows.
-pub fn press(at: [f32; 2], window: Option<usize>, click: Click) -> Press {
+pub fn press(at: [f32; 2], window: Option<usize>, kinds: &[usize], click: Click) -> Press {
     let Some(kind) = window else {
         return if click != Click::Right && on_tab_button(at, SIDE_CONFIG_TAB) {
             Press::OpenWindow
@@ -115,9 +206,9 @@ pub fn press(at: [f32; 2], window: Option<usize>, click: Click) -> Press {
     if on_tab_button(at, SIDE_CONFIG_TAB) {
         return Press::CloseWindow;
     }
-    for other in (0..KINDS).filter(|other| *other != kind) {
-        if on_tab_button(at, kind_tab(other)) {
-            return Press::ShowKind(other);
+    for (place, other) in kinds.iter().enumerate().filter(|(_, other)| **other != kind) {
+        if on_tab_button(at, kind_tab(place)) {
+            return Press::ShowKind(*other);
         }
     }
     let [left, top, width, height] = WINDOW;
@@ -188,35 +279,75 @@ mod tests {
 
     #[test]
     fn the_side_tab_opens_the_window_and_closes_it() {
-        assert_eq!(press(tab_middle(SIDE_CONFIG_TAB), None, Click::Left), Press::OpenWindow);
-        assert_eq!(press(tab_middle(SIDE_CONFIG_TAB), Some(0), Click::Left), Press::CloseWindow);
+        assert_eq!(press(tab_middle(SIDE_CONFIG_TAB), None, ELECTRIC_KINDS, Click::Left), Press::OpenWindow);
+        assert_eq!(press(tab_middle(SIDE_CONFIG_TAB), Some(0), ELECTRIC_KINDS, Click::Left), Press::CloseWindow);
     }
 
     #[test]
     fn a_press_outside_any_control_passes_with_no_window() {
-        assert_eq!(press([64.0, 17.0], None, Click::Left), Press::Pass);
+        assert_eq!(press([64.0, 17.0], None, ELECTRIC_KINDS, Click::Left), Press::Pass);
     }
 
     #[test]
     fn the_window_swallows_a_press_over_a_slot_under_it() {
-        assert_eq!(press([26.0, 100.0], Some(ITEM_KIND), Click::Left), Press::Nothing);
+        assert_eq!(press([26.0, 100.0], Some(ITEM_KIND), ELECTRIC_KINDS, Click::Left), Press::Nothing);
     }
 
     #[test]
     fn a_side_button_gives_its_kind_and_click() {
         let [x, y] = SIDE_BUTTONS[4];
         let at = [WINDOW[0] + x + 1.0, WINDOW[1] + y + 1.0];
-        assert_eq!(press(at, Some(ITEM_KIND), Click::Left), Press::Button(4));
-        assert_eq!(press(at, Some(ENERGY_KIND), Click::Left), Press::Button(10));
-        assert_eq!(press(at, Some(ITEM_KIND), Click::Right), Press::Button(RIGHT_CLICK_BASE + 4));
-        assert_eq!(press(at, Some(ITEM_KIND), Click::Shift), Press::Button(SHIFT_CLICK_BASE + 4));
+        assert_eq!(press(at, Some(ITEM_KIND), ELECTRIC_KINDS, Click::Left), Press::Button(4));
+        assert_eq!(press(at, Some(ENERGY_KIND), ELECTRIC_KINDS, Click::Left), Press::Button(10));
+        assert_eq!(press(at, Some(ITEM_KIND), ELECTRIC_KINDS, Click::Right), Press::Button(RIGHT_CLICK_BASE + 4));
+        assert_eq!(press(at, Some(ITEM_KIND), ELECTRIC_KINDS, Click::Shift), Press::Button(SHIFT_CLICK_BASE + 4));
     }
 
     #[test]
     fn the_shown_kind_has_no_tab_but_the_other_does() {
-        let at = tab_middle(kind_tab(ENERGY_KIND));
-        assert_eq!(press(at, Some(ITEM_KIND), Click::Left), Press::ShowKind(ENERGY_KIND));
-        assert_eq!(press(tab_middle(kind_tab(ITEM_KIND)), Some(ITEM_KIND), Click::Left), Press::Pass);
+        let at = tab_middle(kind_tab(1));
+        assert_eq!(press(at, Some(ITEM_KIND), ELECTRIC_KINDS, Click::Left), Press::ShowKind(ENERGY_KIND));
+        assert_eq!(press(tab_middle(kind_tab(0)), Some(ITEM_KIND), ELECTRIC_KINDS, Click::Left), Press::Pass);
+    }
+
+    #[test]
+    fn the_oxidizer_window_has_three_kinds_with_chemicals_second() {
+        let at = tab_middle(kind_tab(1));
+        assert_eq!(press(at, Some(ITEM_KIND), OXIDIZER_KINDS, Click::Left), Press::ShowKind(CHEMICAL_KIND));
+        let at = tab_middle(kind_tab(2));
+        assert_eq!(press(at, Some(ITEM_KIND), OXIDIZER_KINDS, Click::Left), Press::ShowKind(ENERGY_KIND));
+        let [x, y] = SIDE_BUTTONS[4];
+        let side = [WINDOW[0] + x + 1.0, WINDOW[1] + y + 1.0];
+        assert_eq!(press(side, Some(CHEMICAL_KIND), OXIDIZER_KINDS, Click::Left), Press::Button(16));
+        let [x, y, _] = EJECT_BUTTON;
+        let eject = [WINDOW[0] + x + 1.0, WINDOW[1] + y + 1.0];
+        assert_eq!(press(eject, Some(CHEMICAL_KIND), OXIDIZER_KINDS, Click::Left), Press::Button(62));
+        let [x, y, _] = CLEAR_BUTTON;
+        let clear = [WINDOW[0] + x + 1.0, WINDOW[1] + y + 1.0];
+        assert_eq!(press(clear, Some(ITEM_KIND), OXIDIZER_KINDS, Click::Left), Press::Button(63));
+    }
+
+    #[test]
+    fn the_gauge_shows_at_least_a_pixel_and_rounds() {
+        assert_eq!(gauge_level(0, 10_000, 58), 0);
+        assert_eq!(gauge_level(1, 10_000, 58), 1);
+        assert_eq!(gauge_level(5_000, 10_000, 58), 29);
+        assert_eq!(gauge_level(10_000, 10_000, 58), 58);
+    }
+
+    #[test]
+    fn energy_text_is_compact_with_two_decimals_cut_off() {
+        assert_eq!(energy_text(0), "0 FE");
+        assert_eq!(energy_text(20), "20 FE");
+        assert_eq!(energy_text(1_500), "1.5 kFE");
+        assert_eq!(energy_text(1_999), "1.99 kFE");
+        assert_eq!(energy_fraction(5, 20), "5 FE/20 FE");
+    }
+
+    #[test]
+    fn the_gauge_tooltip_says_empty_or_the_amount() {
+        assert_eq!(gauge_lines(None, 0), ["Empty"]);
+        assert_eq!(gauge_lines(Some("Sulfur Dioxide"), 1_200), ["Sulfur Dioxide: 1,200 mB"]);
     }
 
     #[test]

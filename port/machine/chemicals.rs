@@ -107,7 +107,15 @@ fn mekmachine_chemicals(
             used.insert(JavaString::from(recipe.as_str()), Tag::Int(count + 1));
         }
     }
-    let mut data = vec![0; 8];
+    use crate::game::mek;
+    let mut data = vec![0; mek::DATA_SLOTS];
+    data[mek::DATA_USING] = if machine.active { chemical::OXIDIZER_USAGE as i32 } else { 0 };
+    data[mek::DATA_ITEM_SIDES] = mek::pack_sides(&fields.nbt, mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE);
+    data[mek::DATA_ENERGY_SIDES] = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
+    data[chem::DATA_CHEMICAL_SIDES] = mek::pack_sides(&fields.nbt, chem::CHEMICAL_CONFIG, &mek::CHEMICAL_SIDE_CYCLE);
+    data[chem::DATA_CHEMICAL_KIND] = machine.output.held.as_ref().map_or(0, |held| {
+        chem::OXIDIZED.iter().position(|(id, _)| *id == held.id).map_or(0, |place| place as i32 + 1)
+    });
     data[crate::game::mek::DATA_PROGRESS] = machine.progress;
     data[crate::game::mek::DATA_TICKS] = chemical::OXIDIZER_TICKS;
     data[crate::game::mek::DATA_ENERGY] = machine.energy as i32;

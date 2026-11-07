@@ -178,7 +178,7 @@ So it is not shown to be the mod's fault, and no change was made for it. `run_te
 
 `horizon_driver.run_test` wraps every test. A test calls `begin_checks` just before its first check. If the game has died by then, the test exits with code 75 and `run_tests.py` reports `LAUNCH CRASH`, runs the group once more and records that in the output and the last line. A second crash fails the group. Anything after `begin_checks`, or a failure with the game still alive, is a plain failure and never retried. A group that passes without calling `begin_checks` fails, so a test can't skip the mark.
 
-The runner gives each run a `port/.work/run-...` folder for the tests' folders. It stops anything left in them and removes them when it ends, including on SIGTERM, and clears any `tmp...` and `run-...` left by earlier runs when it starts. A process is identified by its arguments, or by its working directory or an open file in the folder, because macOS hides most processes' environments from `ps`. `port/test_run_tests.py` tests all of this with stand-ins and no game. A real launch was checked with an engine that exits at once (exit 75), and SIGTERM to the runner during a chain run left no process or folder.
+The runner gives each run a `port/.work/run-...` folder for the tests' folders. It stops anything left in them and removes them when it ends, including on SIGTERM, and clears any `tmp...` and `run-...` left by earlier runs when it starts. A process is identified by its arguments, or by its working directory or an open file in the folder, because macOS hides most processes' environments from `ps`. `port/test_run_tests.py` tests all of this with stand-ins and no game. A real launch was checked with an engine that exits at once (exit 75), and SIGTERM to the runner during a chain run left no process or folder. A real segfault hasn't gone through this path, since none recurred. On a dedicated server the supervisor may restart a crashed engine, which would then show as a plain failure rather than a launch crash; that is unverified.
 
 ### Chain speed
 
@@ -187,7 +187,7 @@ The chain took 1,025 s a mode, and starting `horizon-ctl` wasn't the main cost. 
 - `test_chain` sets `tick rate` high while frozen, and back to 20 before anything unfreezes. A step still moves exactly one tick, as a measured run of 10 steps showed.
 - Commands use one kept connection: the control socket in single player and the HTTP API in dedicated mode.
 - In single player `maxFps` goes to 260, because a control request also waits for a client frame.
-- Dedicated mode caps the rate at 400 a second. At 10,000 the supervisor's new connection per command used up the local ports (os error 49) after about 1,000 rows.
+- Dedicated mode caps the rate at 400 a second. At 10,000 the supervisor's new connection per command used up the local ports (os error 49) partway through the last recording, after at least 804 rows.
 
 The chain now takes 76 s in single player and 94 s on a dedicated server, against 1,025 s each. It has the same 1,704 rows and the same comparisons. Changing the cube's energy in row 897 of `chain_after_reload.tsv` from 0 to 1 fails both modes with `chain_after_reload tick 897: cube got 0 expected 1`.
 
