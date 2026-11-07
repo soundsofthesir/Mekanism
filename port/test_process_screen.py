@@ -133,8 +133,17 @@ def check_progress(screen: Screen, art: Path, s: Spec, progress: int) -> None:
 def check_chemical_bar(screen: Screen, textures: Path, s: Spec) -> None:
     """Each filled row is the tile tinted, and each empty one isn't."""
     tile = Image(textures / s.tile)
-    colours = {tuple(c * t // 255 for c, t in zip(tile.pixel(x, y)[:3], s.tint)) for x in range(tile.width) for y in range(tile.height)}
-    is_gas = lambda p: any(all(abs(a - b) <= MAX_CHANNEL_DIFFERENCE for a, b in zip(p, each)) for each in colours)
+    pixels = {tile.pixel(x, y) for x in range(tile.width) for y in range(tile.height)}
+    background = screen.at(s.bar_at[0] + 1 + s.bar_inside[0] / 2, s.bar_at[1] + 1.5)[:3]
+
+    def is_gas(pixel: tuple) -> bool:
+        """The tile is partly see-through, so a filled row is it tinted over the bar's background."""
+        for *colour, alpha in pixels:
+            wanted = [c * t / 255 * alpha / 255 + b * (1 - alpha / 255) for c, t, b in zip(colour, s.tint, background)]
+            if all(abs(a - w) <= MAX_CHANNEL_DIFFERENCE + 1 for a, w in zip(pixel, wanted)):
+                return True
+        return False
+
     inside = s.bar_inside
     filled = math.ceil(s.stored / s.tank * (inside[1] - 1)) + 1
     x = s.bar_at[0] + 1 + inside[0] / 2
