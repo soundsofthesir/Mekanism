@@ -14,13 +14,12 @@ fn mekmachine_screen(block: &str, screen: &mut Option<horizon_client::mod_api::N
         return;
     }
     if block == crate::game::chem::OXIDIZER {
-        // The energy slot and the slot that drains the tank are drawn, but stay out of the menu
-        // until what they use is ported.
-        let [input, _drain, _energy] = layout::OXIDIZER_SLOTS;
+        // The slot that drains the tank is drawn, but stays out of the menu until a chemical item is ported.
+        let [input, _drain, energy] = layout::OXIDIZER_SLOTS;
         *screen = Some(horizon_client::mod_api::NativeScreen {
             width: layout::SCREEN_WIDTH,
             height: layout::SCREEN_HEIGHT,
-            slots: vec![Some(input), None, None, Some(layout::OFF_SCREEN), Some(layout::OFF_SCREEN)],
+            slots: vec![Some(input), None, Some(energy), Some(layout::OFF_SCREEN), Some(layout::OFF_SCREEN)],
             inventory_y: layout::INVENTORY[1],
             inventory_x: layout::INVENTORY[0],
             own_labels: true,
@@ -32,12 +31,11 @@ fn mekmachine_screen(block: &str, screen: &mut Option<horizon_client::mod_api::N
         return;
     }
     // Slot positions from `TileEntityElectricMachine`'s inventory.
-    let [input, output, _energy] = layout::CHAMBER_SLOTS;
+    let [input, output, energy] = layout::CHAMBER_SLOTS;
     *screen = Some(horizon_client::mod_api::NativeScreen {
         width: layout::SCREEN_WIDTH,
         height: layout::SCREEN_HEIGHT,
-        // The energy item slot is left out until something it charges from is ported.
-        slots: vec![Some(input), Some(output), None, Some(layout::OFF_SCREEN), Some(layout::OFF_SCREEN)],
+        slots: vec![Some(input), Some(output), Some(energy), Some(layout::OFF_SCREEN), Some(layout::OFF_SCREEN)],
         inventory_y: layout::INVENTORY[1],
         inventory_x: layout::INVENTORY[0],
         own_labels: true,

@@ -54,6 +54,7 @@ fn mekmachine_chemicals(
     const INPUT: usize = 0;
     const SLOTS: usize = crate::game::mek::MACHINE_SLOTS;
     game.mek_tick_upgrades(entity);
+    game.mek_fill_energy_slot(entity);
     let stack = entity
         .items
         .get(INPUT)

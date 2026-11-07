@@ -1,0 +1,12 @@
+tick	progress	active	energy	input	output	tank	chest	energy_slot	item_energy
+0	0	0	0	-	-	0	-	mekanism:energy_tabletx1	7000
+1	0	0	5000	-	-	0	-	mekanism:energy_tabletx1	2000
+2	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0
+3	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0
+4	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0
+5	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0
+6	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0
+7	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0
+8	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0
+9	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0
+10	0	0	7000	-	-	0	-	mekanism:energy_tabletx1	0

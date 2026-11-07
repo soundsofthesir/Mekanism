@@ -329,3 +329,14 @@ bindings = [
   { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
   { name = "may_place", ty = "&mut bool", value = "&mut *may_place" },
 ]
+
+[[injection]]
+id = "item_energy_buffer"
+hook = "item_energy_buffer"
+hook_version = 1
+kind = "HEAD"
+helper = "item_energy_buffer.rs"
+bindings = [
+  { name = "item", ty = "&str", value = "item" },
+  { name = "buffer", ty = "&mut Option<crate::game::native_item_energy::ItemEnergyBuffer>", value = "&mut *buffer" },
+]

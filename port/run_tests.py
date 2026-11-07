@@ -116,6 +116,7 @@ RULES = [
     ("port/test_upgrades.py", ["upgrades"]),
     ("port/reference/install_*", ["features"]),
     ("port/reference/eject_*", ["features"]),
+    ("port/reference/energy_slot_*", ["features"]),
     ("port/test_gui.py", ["gui", "oxidizer_screen", "upgrades"]),
     ("port/test_oxidizer_screen.py", ["oxidizer_screen"]),
     ("port/png_tools.py", ["gui", "oxidizer_screen"]),

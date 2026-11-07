@@ -70,6 +70,14 @@ class Scenario(NamedTuple):
     extra: tuple[tuple[int, int, str], ...] = ()
 
 
+def tablet(index: int, stored: int) -> str:
+    """A charged Energy Tablet in a slot, with `ATTACHED_ENERGY`'s component."""
+    return (
+        f'{{container:{index}b,stored:{{amount:1L,type:{{id:"mekanism:energy_tablet",'
+        f'components:{{"mekanism:energy":{stored}L}}}}}}}}'
+    )
+
+
 def upgrade_stack(kind: str, count: int) -> str:
     """What a machine's upgrade slot saves, with `IUpgradeHelper.getPatch`'s component."""
     return (
@@ -145,6 +153,15 @@ SCENARIOS = (
         (),
         ((0, 1, CUBE_FULL),),
     ),
+    # The energy slot: `EnergyInventorySlot.fillContainerOrConvert`.
+    Scenario("energy_slot_tablet", (machine(speed=8, items=(tablet(2, 100_000),)),), 30),
+    Scenario("energy_slot_tablet_small", (machine(items=(tablet(2, 100_000),)),), 10),
+    Scenario("energy_slot_tablet_low", (machine(speed=8, items=(tablet(2, 7_000),)),), 10),
+    Scenario("energy_slot_redstone", (machine(speed=8, items=(stack(2, "minecraft:redstone", 3),)),), 10),
+    Scenario("energy_slot_redstone_small", (machine(items=(stack(2, "minecraft:redstone", 3),)),), 10),
+    Scenario("energy_slot_running", (machine(speed=8, items=(*ORES, tablet(2, 100_000))),), 60),
+    Scenario("energy_slot_oxidizer", (machine(block="mekanism:chemical_oxidizer", speed=8, items=(tablet(2, 100_000),)),), 10),
+    Scenario("energy_slot_not_energy", (machine(speed=8, items=(stack(2, "minecraft:dirt", 3),)),), 5),
     # Upgrades a player put in the upgrade slot: `TileComponentUpgrade.tickServer`.
     Scenario("install_speed3", (machine(upgrade_slot=upgrade_stack("speed", 3)),), 30),
     Scenario("install_energy4", (machine(upgrade_slot=upgrade_stack("energy", 4)),), 30),
@@ -167,7 +184,7 @@ def get(text: str, pattern: str, default: str = "0") -> str:
 
 def slot(text: str, index: int) -> str:
     found = re.search(
-        rf'container: {index}b, stored: \{{amount: (\d+)L, type: \{{id: "([^"]+)"', text
+        rf'container: {index}b, stored: \{{amount: (\d+)L, type: \{{(?:components: \{{[^}}]*\}}, )?id: "([^"]+)"', text
     )
     return f"{found.group(2)}x{found.group(1)}" if found else "-"
 
@@ -200,7 +217,13 @@ def upgrade_columns(component: str) -> list[str]:
     return [installed("speed"), installed("energy"), held.group(1) if held else "0"]
 
 
-def row(rcon: java_server.Rcon, tick: int, has_chest: bool, has_upgrades: bool = False) -> str:
+def energy_slot_columns(nbt: str) -> list[str]:
+    """The energy slot's item and what a tablet in it holds."""
+    held = re.search(r'"mekanism:energy": (\d+)L', nbt)
+    return [slot(nbt, 2), held.group(1) if held else "0"]
+
+
+def row(rcon: java_server.Rcon, tick: int, has_chest: bool, has_upgrades: bool = False, has_energy_slot: bool = False) -> str:
     component, nbt = split_upgrades(rcon.command(f"data get block 0 {Y} 0"))
     tank = re.search(r'chemical_tanks: \[\{container: 0b, stored: \{amount: (\d+)L', nbt)
     chest = chest_items(rcon.command(f"data get block 1 {Y} 0")) if has_chest else "-"
@@ -215,6 +238,7 @@ def row(rcon: java_server.Rcon, tick: int, has_chest: bool, has_upgrades: bool =
             tank.group(1) if tank else "0",
             chest,
             *(upgrade_columns(component) if has_upgrades else []),
+            *(energy_slot_columns(nbt) if has_energy_slot else []),
         ]
     )
 
@@ -234,14 +258,15 @@ def record(rcon: java_server.Rcon, scenario: Scenario) -> None:
         rcon.command(f"setblock {x} {Y} {z} {block}")
     has_chest = any("chest" in block for block in scenario.blocks)
     extra = scenario.name.startswith("install_")
-    header = [*FIELDS, *(("speed", "energy_upgrades", "slot") if extra else ())]
-    lines = ["\t".join(["tick", *header]), row(rcon, 0, has_chest, extra)]
+    energy_slot = scenario.name.startswith("energy_slot_")
+    header = [*FIELDS, *(("speed", "energy_upgrades", "slot") if extra else ()), *(("energy_slot", "item_energy") if energy_slot else ())]
+    lines = ["\t".join(["tick", *header]), row(rcon, 0, has_chest, extra, energy_slot)]
     changes = dict(scenario.changes)
     for tick in range(1, scenario.ticks + 1):
         if tick in changes:
             rcon.command(changes[tick])
         java_server.step(rcon)
-        lines.append(row(rcon, tick, has_chest, extra))
+        lines.append(row(rcon, tick, has_chest, extra, energy_slot))
     (OUT / f"{scenario.name}.tsv").write_text("\n".join(lines) + "\n")
     print(scenario.name, lines[1].replace("\t", " "), "|", lines[-1].replace("\t", " "), flush=True)
 

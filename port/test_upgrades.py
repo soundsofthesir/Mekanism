@@ -34,8 +34,10 @@ CLOSE = (10, 10)
 INSTALLING_ARROW = (176, 37)
 UNINSTALLING_ARROW = (176, 58)
 HOTBAR_FIRST = (8, 142)
+ENERGY_SLOT_AT = (64, 53)
 SLOT_MIDDLE = 8
 SPEED_STACK = '{Slot:0b,id:"mekanism:upgrade",count:4,components:{"mekanism:upgrade_type":"mekanism:speed"}}'
+TABLET_STACK = '{Slot:1b,id:"mekanism:energy_tablet",count:1,components:{"minecraft:custom_data":{horizon_energy:100000}}}'
 INSTALL_WAIT_SECONDS = 5
 
 
@@ -157,6 +159,24 @@ def check_window(world, origin, art: Path, folder: Path, scale: int) -> None:
     expect("upgrade slot closed again", widget_at(world, 303)[0] < 0, True)
 
 
+def check_energy_slot(world, origin) -> None:
+    """A tablet a player puts in the energy slot fills the machine, whose 4 speed upgrades hold 3,150."""
+    world.command(f"item replace entity @s hotbar.2 from block 2 {Y} 2 container.1")
+    time.sleep(SETTLE_SECONDS)
+    click(world, *hotbar(origin, 1))
+    click(world, origin[0] + ENERGY_SLOT_AT[0] + SLOT_MIDDLE, origin[1] + ENERGY_SLOT_AT[1] + SLOT_MIDDLE)
+    expect("dirt refused by the energy slot", carried(world) is not None, True)
+    click(world, *hotbar(origin, 1))
+    click(world, *hotbar(origin, 2))
+    click(world, origin[0] + ENERGY_SLOT_AT[0] + SLOT_MIDDLE, origin[1] + ENERGY_SLOT_AT[1] + SLOT_MIDDLE)
+    expect("tablet left the cursor", carried(world), None)
+    time.sleep(SETTLE_SECONDS)
+    nbt = text(world, f"data get block 0 {Y} 0")
+    expect("tablet in the energy slot", features.slot_of(nbt, 2), "mekanism:energy_tabletx1")
+    expect("energy from the tablet", int(re.search(r"\benergy: (\d+)", nbt).group(1)), 3150)
+    expect("what the tablet gave", int(re.search(r"horizon_energy: (\d+)", nbt).group(1)), 100_000 - 3150)
+
+
 def run(world, art: Path, folder: Path) -> None:
     world.start()
     world.command("forceload add 0 -16 16 16")
@@ -166,7 +186,7 @@ def run(world, art: Path, folder: Path) -> None:
     time.sleep(SETTLE_SECONDS)
     world.command(f"setblock 0 {Y} 0 {CHAMBER}{{{SIDES}}}")
     # `give` has no parser for this component, though a chest's data and a slot copy keep it.
-    world.command(f"setblock 2 {Y} 2 minecraft:chest{{Items:[{SPEED_STACK}]}}")
+    world.command(f"setblock 2 {Y} 2 minecraft:chest{{Items:[{SPEED_STACK},{TABLET_STACK}]}}")
     world.command(f"item replace entity @s hotbar.0 from block 2 {Y} 2 container.0")
     world.command("item replace entity @s hotbar.1 with minecraft:dirt 4")
     time.sleep(SETTLE_SECONDS)
@@ -195,6 +215,10 @@ def run(world, art: Path, folder: Path) -> None:
     supply(world)
     compare(world, "upgrade_run_speed4")
     world.command("tick unfreeze")
+    world.command(f"setblock 0 {Y} 1 air")
+    world.command(f"data modify block 0 {Y} 0 Items set value []")
+    world.command(f"data modify block 0 {Y} 0 energy set value 0")
+    check_energy_slot(world, origin)
     world.ctl("close")
     world.stop()
 

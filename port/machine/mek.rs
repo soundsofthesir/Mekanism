@@ -126,6 +126,8 @@ pub(crate) const DATA_SLOTS: usize = 17;
 pub(crate) const UPGRADE_INPUT: usize = 3;
 pub(crate) const UPGRADE_OUTPUT: usize = 4;
 pub(crate) const MACHINE_SLOTS: usize = 5;
+pub(crate) const ENERGY_SLOT: usize = 2;
+pub(crate) const ENERGY_TABLET: &str = "mekanism:energy_tablet";
 pub(crate) const UPGRADE_COMPONENT: &str = "mekanism:upgrade_type";
 pub(crate) const UPGRADE_ITEM: &str = "mekanism:upgrade";
 /// `UPGRADE_NAMES`' order.
@@ -554,16 +556,20 @@ impl Game<'_> {
     }
 
     /// `MachineEnergyContainer`'s capacity when upgrades change it from what `energy.rs` declares.
-    pub(crate) fn mek_upgraded_capacity(id: &str, nbt: &Compound) -> Option<i64> {
-        let (usage, ticks) = match id {
-            "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => (5, 200),
-            "mekanism:crusher" => (8, 200),
+    fn mek_usage_and_ticks(id: &str) -> Option<(i64, i32)> {
+        match id {
+            "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => Some((5, 200)),
+            "mekanism:crusher" => Some((8, 200)),
             super::chem::OXIDIZER => {
                 use mekmachine_engine::chemical::{OXIDIZER_TICKS, OXIDIZER_USAGE};
-                (OXIDIZER_USAGE, OXIDIZER_TICKS)
+                Some((OXIDIZER_USAGE, OXIDIZER_TICKS))
             }
-            _ => return None,
-        };
+            _ => None,
+        }
+    }
+
+    pub(crate) fn mek_upgraded_capacity(id: &str, nbt: &Compound) -> Option<i64> {
+        let (usage, ticks) = Self::mek_usage_and_ticks(id)?;
         nbt.contains_key(&JavaString::from("component_upgrade"))
             .then(|| upgrades_of(nbt).recalculated_capacity(usage, ticks))
     }
@@ -745,6 +751,51 @@ impl Game<'_> {
         if held > capacity {
             entity.nbt.insert(JavaString::from("energy"), Tag::Int(capacity as i32));
         }
+    }
+
+    /// `EnergyInventorySlot.fillContainerOrConvert`: from a charged item, or else from a conversion
+    /// recipe, which only runs if all of its energy fits.
+    pub(crate) fn mek_fill_energy_slot(&self, entity: &mut horizon_client::containers::ModBlockEntity) {
+        let Some(stack) = entity.items.get(ENERGY_SLOT).cloned().flatten() else {
+            return;
+        };
+        let capacity = Self::mek_capacity(&entity.id, &entity.nbt);
+        let held = energy_of(&entity.nbt);
+        let room = (capacity - held).max(0);
+        if room > 0
+            && let Some((moved, left)) = self.native_item_energy_extract(&stack, room.min(i64::from(i32::MAX)) as i32)
+            && moved > 0
+        {
+            entity.items[ENERGY_SLOT] = Some(left);
+            entity.nbt.insert(JavaString::from("energy"), Tag::Int((held + i64::from(moved)) as i32));
+            return;
+        }
+        for recipe in self.native_recipes_of_type("mekanism:energy_conversion") {
+            let wanted = &recipe.json["input"];
+            let Some(ingredient) = self.native_recipe_ingredient(&wanted["ingredient"]) else {
+                continue;
+            };
+            let needed = wanted["count"].as_u64().unwrap_or(1) as u32;
+            if !ingredient.test(&stack) || stack.count < needed {
+                continue;
+            }
+            let output = recipe.json["output"].as_i64().unwrap_or(0);
+            if output <= room {
+                entity.items[ENERGY_SLOT] = (stack.count > needed).then(|| horizon_client::items::ItemStack {
+                    count: stack.count - needed,
+                    ..stack.clone()
+                });
+                entity.nbt.insert(JavaString::from("energy"), Tag::Int((held + output) as i32));
+            }
+            return;
+        }
+    }
+
+    /// What a machine holds at most right now.
+    pub(crate) fn mek_capacity(id: &str, nbt: &Compound) -> i64 {
+        Self::mek_upgraded_capacity(id, nbt)
+            .or_else(|| Self::mek_usage_and_ticks(id).map(|(usage, ticks)| Upgrades::default().capacity(usage, ticks)))
+            .unwrap_or(0)
     }
 
     /// `TileComponentUpgrade.tickServer`.

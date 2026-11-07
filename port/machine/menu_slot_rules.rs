@@ -7,6 +7,7 @@ fn mekmachine_menu_slot_rules(
     stack: &horizon_client::items::ItemStack,
     may_place: &mut bool,
 ) {
+    const ENERGY_SLOT: usize = 2;
     const UPGRADE_INPUT: usize = 3;
     const MACHINES: [&str; 4] = [
         "mekanism:enrichment_chamber",
@@ -14,7 +15,15 @@ fn mekmachine_menu_slot_rules(
         "mekanism:energized_smelter",
         "mekanism:chemical_oxidizer",
     ];
-    if slot != UPGRADE_INPUT || !MACHINES.contains(&menu) {
+    if !MACHINES.contains(&menu) {
+        return;
+    }
+    if slot == ENERGY_SLOT {
+        // `EnergyInventorySlot.canFillOrConvert`, for the only energy item and conversions ported.
+        *may_place = matches!(&*stack.item, "mekanism:energy_tablet" | "minecraft:redstone" | "minecraft:redstone_block");
+        return;
+    }
+    if slot != UPGRADE_INPUT {
         return;
     }
     let kind = stack.data().and_then(|data| data.other("mekanism:upgrade_type"));

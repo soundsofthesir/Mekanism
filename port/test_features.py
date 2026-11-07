@@ -17,9 +17,9 @@ WORK = HERE / ".work"
 REFERENCE = HERE / "reference"
 Y = 200
 NORMAL_TICK_RATE = 20
-PREFIXES = ("upgrade_", "redstone_", "eject_", "install_")
+PREFIXES = ("upgrade_", "redstone_", "eject_", "install_", "energy_slot_")
 UPGRADE_SLOT = re.compile(r'items:\[\{container:0b,stored:\{amount:(\d+)L,type:\{id:"mekanism:upgrade",components:\{("[^"]+":"[^"]+")\}\}\}\}\]')
-ITEM = re.compile(r'\{container:(\d+)b,stored:\{amount:(\d+)L,type:\{id:"([^"]+)"\}\}\}')
+ITEM = re.compile(r'\{container:(\d+)b,stored:\{amount:(\d+)L,type:\{id:"([^"]+)"(?:,components:\{"mekanism:energy":(\d+)L\})?\}\}\}')
 
 
 def here_format(block: str) -> str:
@@ -30,7 +30,12 @@ def here_format(block: str) -> str:
     if found:
         extra = f'{{Slot:3b,id:"mekanism:upgrade",count:{found.group(1)},components:{{{found.group(2)}}}}}'
         block = block.replace(found.group(0), "").replace(",}", "}")
-    block = ITEM.sub(lambda m: f'{{Slot:{m.group(1)}b,id:"{m.group(3)}",count:{m.group(2)}}}', block)
+    def item(m: re.Match) -> str:
+        # Horizon's item energy helpers keep it in `horizon_energy`.
+        data = f',components:{{"minecraft:custom_data":{{horizon_energy:{m.group(4)}}}}}' if m.group(4) else ""
+        return f'{{Slot:{m.group(1)}b,id:"{m.group(3)}",count:{m.group(2)}{data}}}'
+
+    block = ITEM.sub(item, block)
     block = block.replace("items:[", "Items:[")
     if extra and "Items:[" in block:
         block = re.sub(r"Items:\[([^\]]*)\]", lambda m: f"Items:[{m.group(1)},{extra}]", block, count=1)
@@ -76,7 +81,12 @@ def upgrade_columns(nbt: str) -> list[str]:
     return [installed("speed"), installed("energy"), held.split("x")[-1] if held != "-" else "0"]
 
 
-def row(world, tick: str, has_chest: bool, has_upgrades: bool = False) -> list[str]:
+def energy_slot_columns(nbt: str) -> list[str]:
+    held = re.search(r"horizon_energy: (\d+)", nbt)
+    return [slot_of(nbt, 2), held.group(1) if held else "0"]
+
+
+def row(world, tick: str, has_chest: bool, has_upgrades: bool = False, has_energy_slot: bool = False) -> list[str]:
     nbt = " ".join(world.command(f"data get block 0 {Y} 0"))
     get = lambda pattern: (re.search(pattern, nbt) or [None, "0"])[1]
     tank = re.search(r"chemical_tanks: \[\{container: 0b, stored: \{amount: (\d+)L", nbt)
@@ -90,6 +100,7 @@ def row(world, tick: str, has_chest: bool, has_upgrades: bool = False) -> list[s
         tank.group(1) if tank else "0",
         java.chest_items(" ".join(world.command(f"data get block 1 {Y} 0"))) if has_chest else "-",
         *(upgrade_columns(nbt) if has_upgrades else []),
+        *(energy_slot_columns(nbt) if has_energy_slot else []),
     ]
 
 
@@ -123,7 +134,7 @@ def replay(world, scenario: java.Scenario) -> list[str]:
         if tick in changes:
             world.command(here_command(changes[tick]))
         step(world)
-        got = row(world, wanted[0], has_chest, has_upgrades)
+        got = row(world, wanted[0], has_chest, has_upgrades, scenario.name.startswith("energy_slot_"))
         if got != wanted:
             failures.append(f"{scenario.name} tick {tick}: got {got} expected {wanted}")
             break

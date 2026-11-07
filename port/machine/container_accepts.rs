@@ -29,6 +29,18 @@ fn mekmachine_container_accepts(
         }
         return;
     }
+    if slot == mek::ENERGY_SLOT {
+        // By a side set to energy, and only what `menu_slot_rules` lets a player place.
+        let side_is_energy = face.is_none_or(|face| {
+            let index = mek::relative_index(game.mek_facing(pos), face);
+            mek::side_value(&entity.nbt, mek::ITEM_CONFIG, index) == mek::SIDE_ENERGY
+        });
+        let usable = matches!(&*stack.item, mek::ENERGY_TABLET | "minecraft:redstone" | "minecraft:redstone_block");
+        if !side_is_energy || !usable {
+            *cancel = true;
+        }
+        return;
+    }
     let side_is_input = face.is_none_or(|face| {
         let index = mek::relative_index(game.mek_facing(pos), face);
         mek::side_value(&entity.nbt, mek::ITEM_CONFIG, index) == mek::SIDE_INPUT
