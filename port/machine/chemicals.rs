@@ -122,7 +122,7 @@ fn mekmachine_chemicals(
     let mut data = vec![0; mek::DATA_SLOTS];
     let capacity = upgrades.capacity(chemical::OXIDIZER_USAGE, chemical::OXIDIZER_TICKS);
     let using = if machine.active { energy_per_tick } else { 0 };
-    let capacity = crate::game::Game::mek_upgraded_capacity(&fields.id, &fields.nbt).unwrap_or(capacity);
+    let capacity = crate::game::Game::mek_upgraded_capacity(&fields.id, &fields.nbt, &fields.data).unwrap_or(capacity);
     mek::fill_menu(&mut data, &fields.nbt, machine.energy, capacity, using);
     data[mek::DATA_ITEM_SIDES] = mek::pack_sides(&fields.nbt, mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE);
     data[mek::DATA_ENERGY_SIDES] = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
@@ -133,5 +133,6 @@ fn mekmachine_chemicals(
     data[crate::game::mek::DATA_PROGRESS] = machine.progress;
     data[crate::game::mek::DATA_TICKS] = ticks;
     data[chem::DATA_CHEMICAL] = machine.output.held.as_ref().map_or(0, |held| held.amount as i32);
+    crate::game::mek::keep_recalculated(&fields.data, &mut data);
     fields.data = data;
 }

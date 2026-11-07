@@ -145,12 +145,13 @@ fn mekmachine_machines(
     let mut data = vec![0; mek::DATA_SLOTS];
     let capacity = upgrades.capacity(usage, mekmachine_engine::recipe_machine::TICKS_REQUIRED);
     let using = if machine.active { energy_per_tick } else { 0 };
-    let capacity = crate::game::Game::mek_upgraded_capacity(&fields.id, &fields.nbt).unwrap_or(capacity);
+    let capacity = crate::game::Game::mek_upgraded_capacity(&fields.id, &fields.nbt, &fields.data).unwrap_or(capacity);
     mek::fill_menu(&mut data, &fields.nbt, machine.energy, capacity, using);
     data[mek::DATA_PROGRESS] = machine.progress;
     data[mek::DATA_TICKS] = ticks;
     data[mek::DATA_ITEM_SIDES] = item_sides;
     data[mek::DATA_ENERGY_SIDES] = energy_sides;
+    crate::game::mek::keep_recalculated(&fields.data, &mut data);
     fields.data = data;
     if machine.active != was_active {
         const UPDATE_ALL: i32 = 3;

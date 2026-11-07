@@ -248,35 +248,33 @@ pub(crate) fn cycle_control(nbt: &mut Compound, forward: bool) {
 
 /// A machine's capacity follows its upgrades once `recalculateUpgrades` has run, which it does when
 /// `component_upgrade` loads and at any install or uninstall. The real mod's saved data has that key
-/// only if something is installed or in an upgrade slot, so this mark, like its in-memory value,
-/// must not outlast the process. See `reload_*` in `port/reference`.
-const RECALCULATED_KEY: &str = "mek_recalculated";
+/// only if something is installed or in an upgrade slot, so what says it has run must go on any load,
+/// as a chunk unloading shows (`port/reference/unload_*`). A block entity's `data` isn't saved and
+/// loads empty, so the mark is one more value there, past what a menu sends.
+const DATA_RECALCULATED: usize = DATA_SLOTS;
 
-fn this_process() -> i32 {
-    static ID: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
-    *ID.get_or_init(|| {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |since| since.subsec_nanos());
-        (std::process::id() ^ nanos) as i32
-    })
+fn mark_recalculated(data: &mut Vec<i32>) {
+    if data.len() <= DATA_RECALCULATED {
+        data.resize(DATA_RECALCULATED + 1, 0);
+    }
+    data[DATA_RECALCULATED] = 1;
 }
 
-fn mark_recalculated(nbt: &mut Compound) {
-    nbt.insert(JavaString::from(RECALCULATED_KEY), Tag::Int(this_process()));
+/// Carries the mark to the data a machine's tick has just built.
+pub(crate) fn keep_recalculated(old: &[i32], new: &mut Vec<i32>) {
+    if old.get(DATA_RECALCULATED) == Some(&1) {
+        mark_recalculated(new);
+    }
 }
 
-fn is_recalculated(nbt: &Compound) -> bool {
+fn is_recalculated(nbt: &Compound, data: &[i32]) -> bool {
     let installed = upgrades_of(nbt);
-    installed.speed > 0
-        || installed.energy > 0
-        || matches!(nbt.get(&JavaString::from(RECALCULATED_KEY)), Some(Tag::Int(mark)) if *mark == this_process())
+    installed.speed > 0 || installed.energy > 0 || data.get(DATA_RECALCULATED) == Some(&1)
 }
 
 /// Which of `UPGRADE_IDS` a saved `component_upgrade` count goes under. Like the real mod's, the key
 /// goes when nothing is left under it.
 fn set_installed(nbt: &mut Compound, id: &str, count: i32) {
-    mark_recalculated(nbt);
     let key = JavaString::from("component_upgrade");
     let Tag::Compound(component) = nbt.entry(key.clone()).or_insert_with(|| Tag::Compound(Compound::new())) else {
         return;
@@ -557,6 +555,14 @@ impl Game<'_> {
         })
     }
 
+    /// The block entity's unsaved `data`, for what `mek_saved` can't tell.
+    fn mek_saved_data(&self, pos: [i32; 3]) -> &[i32] {
+        match self.world.block_entities.get(&(pos[0], pos[1], pos[2])) {
+            Some(horizon_client::containers::BlockEntity::Mod(entity)) => &entity.data,
+            _ => &[],
+        }
+    }
+
     fn mek_saved(&self, pos: [i32; 3]) -> Option<(&str, &Compound)> {
         match self.world.block_entities.get(&(pos[0], pos[1], pos[2])) {
             Some(horizon_client::containers::BlockEntity::Mod(entity)) if !entity.id.is_empty() => {
@@ -629,9 +635,9 @@ impl Game<'_> {
         }
     }
 
-    pub(crate) fn mek_upgraded_capacity(id: &str, nbt: &Compound) -> Option<i64> {
+    pub(crate) fn mek_upgraded_capacity(id: &str, nbt: &Compound, data: &[i32]) -> Option<i64> {
         let (usage, ticks) = Self::mek_usage_and_ticks(id)?;
-        is_recalculated(nbt).then(|| upgrades_of(nbt).recalculated_capacity(usage, ticks))
+        is_recalculated(nbt, data).then(|| upgrades_of(nbt).recalculated_capacity(usage, ticks))
     }
 
     fn mek_cable_capacities(&self, cables: &[[i32; 3]]) -> Vec<i64> {
@@ -676,7 +682,7 @@ impl Game<'_> {
         if nbt_side != SIDE_INPUT {
             return 0;
         }
-        if let Some(capacity) = Self::mek_upgraded_capacity(&id, nbt) {
+        if let Some(capacity) = Self::mek_upgraded_capacity(&id, nbt, self.mek_saved_data(pos)) {
             return (capacity - energy_of(nbt)).max(0);
         }
         i64::from(self.native_energy_insert(pos, side, i32::MAX, true))
@@ -699,7 +705,7 @@ impl Game<'_> {
             return room;
         }
         if let Some((id, nbt)) = self.mek_saved(pos)
-            && Self::mek_upgraded_capacity(&id, nbt).is_some()
+            && Self::mek_upgraded_capacity(&id, nbt, self.mek_saved_data(pos)).is_some()
         {
             let energy = energy_of(nbt) + room;
             let key = (pos[0], pos[1], pos[2]);
@@ -816,7 +822,7 @@ impl Game<'_> {
 
     /// `MachineEnergyContainer.setMaxEnergy`: a smaller capacity cuts what's stored.
     fn mek_clamp_energy(entity: &mut horizon_client::containers::ModBlockEntity) {
-        let Some(capacity) = Self::mek_upgraded_capacity(&entity.id, &entity.nbt) else {
+        let Some(capacity) = Self::mek_upgraded_capacity(&entity.id, &entity.nbt, &entity.data) else {
             return;
         };
         let held = energy_of(&entity.nbt);
@@ -831,7 +837,7 @@ impl Game<'_> {
         let Some(stack) = entity.items.get(slot).cloned().flatten() else {
             return;
         };
-        let capacity = Self::mek_capacity(&entity.id, &entity.nbt);
+        let capacity = Self::mek_capacity(&entity.id, &entity.nbt, &entity.data);
         let held = energy_of(&entity.nbt);
         let room = (capacity - held).max(0);
         if room > 0
@@ -882,9 +888,9 @@ impl Game<'_> {
     }
 
     /// What a machine holds at most right now.
-    pub(crate) fn mek_capacity(id: &str, nbt: &Compound) -> i64 {
+    pub(crate) fn mek_capacity(id: &str, nbt: &Compound, data: &[i32]) -> i64 {
         cube_capacity(id)
-            .or_else(|| Self::mek_upgraded_capacity(id, nbt))
+            .or_else(|| Self::mek_upgraded_capacity(id, nbt, data))
             .or_else(|| Self::mek_usage_and_ticks(id).map(|(usage, ticks)| Upgrades::default().capacity(usage, ticks)))
             .unwrap_or(0)
     }
@@ -898,9 +904,9 @@ impl Game<'_> {
         }
         // The real mod saves these slots under `component_upgrade`, so loading them recalculates.
         if (entity.items[UPGRADE_INPUT].is_some() || entity.items[UPGRADE_OUTPUT].is_some())
-            && !is_recalculated(&entity.nbt)
+            && !is_recalculated(&entity.nbt, &entity.data)
         {
-            mark_recalculated(&mut entity.nbt);
+            mark_recalculated(&mut entity.data);
         }
         let found = entity.items[UPGRADE_INPUT].clone().and_then(|stack| {
             self.mek_upgrade_kind(&stack).map(|kind| (kind, stack.count as i32))
@@ -918,6 +924,7 @@ impl Game<'_> {
         entity.nbt.insert(JavaString::from(INSTALL_TICKS_KEY), Tag::Int(ticks));
         if added > 0 {
             set_installed(&mut entity.nbt, kind, installed + added);
+            mark_recalculated(&mut entity.data);
             let left = count - added;
             entity.items[UPGRADE_INPUT] = if left > 0 {
                 entity.items[UPGRADE_INPUT].clone().map(|stack| horizon_client::items::ItemStack { count: left as u32, ..stack })
@@ -956,6 +963,7 @@ impl Game<'_> {
         }
         entity.items[UPGRADE_OUTPUT] = Some(horizon_client::items::ItemStack { count: (held + removed) as u32, ..one });
         set_installed(&mut entity.nbt, id, installed - removed);
+        mark_recalculated(&mut entity.data);
         Self::mek_clamp_energy(entity);
     }
 

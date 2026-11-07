@@ -95,6 +95,7 @@ RULES = [
     ("port/test_reload.py", ["reload"]),
     ("port/reference/reload_*", ["reload"]),
     ("port/reference/live_*", ["reload"]),
+    ("port/reference/unload_*", ["reload"]),
     ("port/java_reference_chemical.py", ["chemical"]),
     ("port/java_reference_features.py", ["features"]),
     ("port/java_*", []),

@@ -203,7 +203,7 @@ Full run on this work, `--all` after a rebuild: 22 of 23 runs passed in 886 s (1
 Known differences this batch leaves:
 
 - Upgrades: no sneak-use on a machine to install, no chemical, muffling or other kinds, no "supported" row or effect line in the window, and the window's list can't scroll (two kinds fit). The upgrade item has no icon, because Horizon lacks `mekanism:component_item`. Its slot's frame overlaps an inventory slot by 3 pixels, so a press on the frame's left edge takes the inventory slot. The window hides slot tooltips under it. The saved format is the container's slots 3 and 4, not `component_upgrade.items`.
-- Saved machines: see "Saved machines through a reload". The port's data has a `mek_recalculated` key that the real mod's hasn't, and a chunk unloading doesn't clear it, only a new process does.
+- Saved machines: see "Saved machines through a reload".
 - Ejecting: `eject_delay` and `upgrade_ticks` are saved, where the real mod's reset on a reload. A cube's item eject button stays in the side window, where the real mod has `setCanEject(false)`, though it does nothing.
 - Energy slots: a player can place an empty tablet, which the real slot refuses. The tag `c:dusts/redstone` is reduced to redstone and a block of it in the slot's placement rule, though the recipes run from the real tag.
 - Tiers: no creative tier. Tubes and pipes have no pull. Cables of other tiers draw from their own textures, but only the basic one's look was checked by test. Each pipe and tube still has the plain model.
@@ -277,7 +277,7 @@ The runner gives each run a `port/.work/run-...` folder for the tests' folders. 
 
 ### Saved machines through a reload
 
-This plan used to say the real mod always writes `component_upgrade`, so a fresh machine reloads holding 1,000 where the port stayed at 20. That was wrong, and came from reading `serialize` without a recording. `port/java_reference_reload.py` records 8 scenarios through a real server restart, and `port/test_reload.py` replays them in both modes, every field of every row:
+This plan used to say the real mod always writes `component_upgrade`, so a fresh machine reloads holding 1,000 where the port stayed at 20. That was wrong, and came from reading `serialize` without a recording. `port/java_reference_reload.py` records 8 scenarios through a real server restart and 3 through a real chunk unload, and `port/test_reload.py` replays them in both modes, every field of every row:
 
 | Machine before the restart | Key saved | Holds after reload |
 |---|---|---|
@@ -287,16 +287,21 @@ This plan used to say the real mod always writes `component_upgrade`, so a fresh
 | None installed, 2 upgrades in the output slot | Yes | 1,000 |
 | The same, with the slot then emptied | No | 20 |
 | The same with no reload at all (`live_output_emptied`) | No | 1,000 |
+| Emptied, through a chunk unload (`unload_output_emptied`) | No | 20 |
+| 2 in the output slot, through a chunk unload | Yes | 1,000 |
+| Fresh with 15 FE, through a chunk unload | No | 20 |
 
 So the real rule is that the key is saved only if something is installed or in an upgrade slot, and a machine's capacity follows its upgrades only after a recalculation in this load.
 
 `chain_after_reload` passed because this path had no difference. Its chamber and smelter are fresh machines, and in all 901 rows, with a cube supplying them after the restart, neither holds more than 20. Port and recording agreed, and no check needed fixing. Making the port hold 1,000 on any fresh machine fails `chain` at `network_split` tick 1 and `reload` at `reload_fresh_empty` tick 1.
 
-The port did differ elsewhere. It treated the key's presence as the rule, so a machine with everything uninstalled stayed at 1,000 through a reload. Now capacity follows its upgrades if any are installed, or if a mark says this process has recalculated. An install, an uninstall or an item in either upgrade slot sets the mark, which holds the process's id, so a reload ignores it. The key goes when nothing is under it, as in the real mod.
+The port did differ elsewhere. It treated the key's presence as the rule, so a machine with everything uninstalled stayed at 1,000 through a reload. Now capacity follows its upgrades if any are installed, or if a mark says the block has recalculated since it loaded. An install, an uninstall or an item in either upgrade slot sets the mark. It lives in the block entity's `data`, one value past what a menu sends. Horizon doesn't save `data` and rebuilds it empty in `decode_mod_block_entity`, so the mark goes on any load, as the real mod's in-memory state does. The key goes when nothing is under it, as in the real mod.
 
-Breaks: the mark outlasting a reload fails `reload_output_emptied` tick 1 (got 1,000); slots not recalculating fails `reload_output_slot` tick 1 (got 20); the key kept after uninstalling all passed `upgrades` at first, so `test_upgrades` now uninstalls all and fails with `no saved upgrades once all are uninstalled`.
+An earlier version held the process id in the saved data. That survived a chunk unload, which the recording shows is wrong: rebuilt that way, the port fails `unload_output_emptied` tick 1 in both modes (got 1,000, expected 20) while every `reload_*` row passes. The test checks that a read answers "not loaded" before it loads the chunk again, on both sides.
 
-Known differences: the port learns of a slot's item in its first tick, where the real mod does as it loads. `test_reload` allows for that with one tick before its first row, with nothing supplying the machines. The real mod saves the slots under `component_upgrade.items`, and the port as container slots 3 and 4, so the test's `component` column reads either. A player re-entering a single-player world in one process, or a chunk unloading, doesn't reset the mark. Neither is recorded.
+Breaks: not carrying the mark from tick to tick fails `reload_output_slot` tick 1 (got 20); slots not recalculating failed the same row on the earlier version, and the mark outlasting a reload failed `reload_output_emptied` tick 1 (got 1,000); the key kept after uninstalling all passed `upgrades` at first, so `test_upgrades` now uninstalls all and fails with `no saved upgrades once all are uninstalled`.
+
+Known differences: the port learns of a slot's item in its first tick, where the real mod does as it loads. `test_reload` allows for that with one tick before its first row, with nothing supplying the machines. The real mod saves the slots under `component_upgrade.items`, and the port as container slots 3 and 4, so the test's `component` column reads either. A `data` command on a machine rebuilds its block entity here, which clears the mark, where the real mod keeps the capacity, so the test empties the slot by `item replace`. Re-entering a single-player world isn't recorded, since the real mod needs a Java client for that. It goes through the same decode here.
 
 ### Stale engine guard and failure evidence
 
