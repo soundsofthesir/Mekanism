@@ -40,13 +40,15 @@ fn mekmachine_container_accepts(
         }
         return;
     }
-    if entity.id == mek::COMPRESSOR && slot == mek::ADVANCED_SECONDARY {
-        // `ChemicalInventorySlot.fillOrConvert`: by a side set to input, and only what converts.
+    if slot == mek::ADVANCED_SECONDARY
+        && let Some(def) = mekmachine_engine::process_table::process(&entity.id)
+    {
+        // By a side set to input, and only what `ChemicalInventorySlot.fillOrConvert` or a recipe takes.
         let side_is_input = face.is_none_or(|face| {
             let index = mek::relative_index(game.mek_facing(pos), face);
             mek::side_value(&entity.nbt, mek::ITEM_CONFIG, index) == mek::SIDE_INPUT
         });
-        if !side_is_input || game.mek_chemical_from(stack).is_none() {
+        if !side_is_input || !game.mek_extra_items(def).iter().any(|item| *item == *stack.item) {
             *cancel = true;
         }
         return;

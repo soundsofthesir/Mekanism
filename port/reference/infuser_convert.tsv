@@ -1,0 +1,12 @@
+tick	progress	active	energy	input	extra	output	chemical	tank
+0	0	0	100000	mekanism:dust_copperx7	mekanism:dust_tinx3	-	-	0
+1	1	1	99995	mekanism:dust_copperx7	mekanism:dust_tinx2	-	mekanism:tin	10
+2	2	1	99990	mekanism:dust_copperx7	mekanism:dust_tinx1	-	mekanism:tin	20
+3	3	1	99985	mekanism:dust_copperx7	-	-	mekanism:tin	30
+4	4	1	99980	mekanism:dust_copperx7	-	-	mekanism:tin	30
+5	5	1	99975	mekanism:dust_copperx7	-	-	mekanism:tin	30
+6	6	1	99970	mekanism:dust_copperx7	-	-	mekanism:tin	30
+7	7	1	99965	mekanism:dust_copperx7	-	-	mekanism:tin	30
+8	8	1	99960	mekanism:dust_copperx7	-	-	mekanism:tin	30
+9	9	1	99955	mekanism:dust_copperx7	-	-	mekanism:tin	30
+10	10	1	99950	mekanism:dust_copperx7	-	-	mekanism:tin	30

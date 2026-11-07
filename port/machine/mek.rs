@@ -60,18 +60,14 @@ pub(crate) const DIRECTIONS: [Direction; 6] = [
     Direction::East,
 ];
 
-/// `TileEntityOsmiumCompressor`, with `osmiumCompressor`'s usage from `UsageConfig`.
-pub(crate) const COMPRESSOR: &str = "mekanism:osmium_compressor";
-pub(crate) const COMPRESSOR_USAGE: i64 = 15;
-/// Its secondary slot follows the slots it shares with the other machines.
+/// The slot after those the machines in `process_table.rs` share with the other machines.
 pub(crate) const ADVANCED_SECONDARY: usize = 5;
 pub(crate) const ADVANCED_SLOTS: usize = 6;
 
 pub(crate) fn has_block_entity(block: &str) -> bool {
-    matches!(
-        block,
-        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" | COMPRESSOR
-    ) || is_cube(block)
+    matches!(block, "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter")
+        || mekmachine_engine::process_table::process(block).is_some()
+        || is_cube(block)
         || is_cable(block)
         || block == GENERATOR
         || block == super::chem::OXIDIZER
@@ -92,9 +88,10 @@ pub(crate) fn default_config(block: &str) -> Compound {
     }
     let (energy, items): ([i32; 6], [i32; 6]) = match block {
         cube if is_cube(cube) => (CUBE_ENERGY_SIDES, CUBE_ITEM_SIDES),
-        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" | COMPRESSOR => {
+        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" => {
             ([SIDE_INPUT; 6], MACHINE_ITEM_SIDES)
         }
+        block if mekmachine_engine::process_table::process(block).is_some() => ([SIDE_INPUT; 6], MACHINE_ITEM_SIDES),
         _ => return Compound::new(),
     };
     let mut config = Compound::new();
@@ -447,6 +444,46 @@ thread_local! {
     static FORMED: RefCell<HashMap<String, Vec<[i32; 3]>>> = RefCell::new(HashMap::new());
 }
 
+/// Where a recipe type names its item input.
+pub(crate) fn process_input_key(recipes: &str) -> &'static str {
+    match recipes {
+        "mekanism:combining" => "main_input",
+        "mekanism:sawing" => "input",
+        _ => "item_input",
+    }
+}
+
+/// This tick's draws for a machine. A block's `test_rolls` forces them, for a recording's replay: one
+/// number a tick, a multiple of the chemical amount, or 1 for a chance output and 0 for none. Only a
+/// command can set it.
+pub(crate) fn process_rolls(
+    entity: &mut horizon_client::containers::ModBlockEntity,
+    def: &mekmachine_engine::process_table::ProcessDef,
+    mean: f64,
+) -> mekmachine_engine::advanced::Rolls {
+    use mekmachine_engine::advanced::{ROLL_ALWAYS, ROLL_NEVER, Rolls, inverse_poisson, next_unit};
+    let at_key = JavaString::from("test_roll_at");
+    let at = match entity.nbt.get(&at_key) {
+        Some(Tag::Int(at)) => *at,
+        _ => 0,
+    };
+    let forced = match entity.nbt.get(&JavaString::from("test_rolls")) {
+        Some(Tag::IntArray(rolls)) => rolls.get(at as usize).copied(),
+        _ => None,
+    };
+    if forced.is_some() {
+        entity.nbt.insert(at_key, Tag::Int(at + 1));
+    }
+    Rolls {
+        chemical: def.statistical.then(|| forced.map_or_else(|| inverse_poisson(mean, next_unit()), i64::from)),
+        byproduct: match forced {
+            Some(0) => ROLL_NEVER,
+            Some(_) => ROLL_ALWAYS,
+            None => next_unit(),
+        },
+    }
+}
+
 impl Game<'_> {
     /// `RenderUniversalCable` over `TransmitterBlockStateModel`: the model's parts for each side's
     /// connection, then, full bright, what the cable holds. The real mod's scale is the network's and
@@ -524,10 +561,8 @@ impl Game<'_> {
     }
 
     pub(crate) fn mek_is_machine(block: &str) -> bool {
-        matches!(
-            block,
-            "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" | COMPRESSOR
-        )
+        matches!(block, "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter")
+            || mekmachine_engine::process_table::process(block).is_some()
     }
 
     /// What an item is worth in the Heat Generator's fuel slot.
@@ -545,9 +580,9 @@ impl Game<'_> {
 
     /// `TileEntityRecipeMachine.containsRecipe`.
     pub(crate) fn mek_has_recipe(&self, block: &str, stack: &horizon_client::items::ItemStack) -> bool {
-        if block == COMPRESSOR {
-            return self.native_recipes_of_type("mekanism:compressing").iter().any(|recipe| {
-                self.native_recipe_ingredient(&recipe.json["item_input"]["ingredient"])
+        if let Some(def) = mekmachine_engine::process_table::process(block) {
+            return self.native_recipes_of_type(def.recipes).iter().any(|recipe| {
+                self.native_recipe_ingredient(&recipe.json[process_input_key(def.recipes)]["ingredient"])
                     .is_some_and(|ingredient| ingredient.test(stack))
             });
         }
@@ -640,7 +675,9 @@ impl Game<'_> {
         match id {
             "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => Some((5, 200)),
             "mekanism:crusher" => Some((8, 200)),
-            COMPRESSOR => Some((COMPRESSOR_USAGE, mekmachine_engine::advanced::BASE_TICKS)),
+            block if mekmachine_engine::process_table::process(block).is_some() => {
+                mekmachine_engine::process_table::process(block).map(|def| (def.usage, mekmachine_engine::advanced::BASE_TICKS))
+            }
             super::chem::OXIDIZER => {
                 use mekmachine_engine::chemical::{OXIDIZER_TICKS, OXIDIZER_USAGE};
                 Some((OXIDIZER_USAGE, OXIDIZER_TICKS))
@@ -909,25 +946,91 @@ impl Game<'_> {
             .unwrap_or(0)
     }
 
-    /// What one item of `stack` converts to, by `mekanism:chemical_conversion`, if the Osmium
-    /// Compressor's tank takes it: only a chemical some compressing recipe uses (`containsRecipeB`).
-    pub(crate) fn mek_chemical_from(&self, stack: &horizon_client::items::ItemStack) -> Option<(String, i64)> {
+    /// What one item of `stack` converts to, by `mekanism:chemical_conversion`, if the machine's tank
+    /// takes it. `containsRecipeBA` with an item in `input`, or `containsRecipeB` without one.
+    pub(crate) fn mek_chemical_from(
+        &self,
+        stack: &horizon_client::items::ItemStack,
+        def: &mekmachine_engine::process_table::ProcessDef,
+        input: Option<&horizon_client::items::ItemStack>,
+    ) -> Option<(String, i64)> {
         self.native_recipes_of_type("mekanism:chemical_conversion").iter().find_map(|recipe| {
             let ingredient = self.native_recipe_ingredient(&recipe.json["input"]["ingredient"])?;
             if !ingredient.test(stack) {
                 return None;
             }
             let id = recipe.json["output"]["id"].as_str()?;
-            let used = self.native_recipes_of_type("mekanism:compressing").iter().any(|compressing| {
-                self.native_recipe_chemical_matches(&compressing.json["chemical_input"]["ingredient"], id)
-            });
-            used.then(|| Some((id.to_owned(), recipe.json["output"]["amount"].as_i64()?))).flatten()
+            self.mek_tank_takes(def, id, input)
+                .then(|| Some((id.to_owned(), recipe.json["output"]["amount"].as_i64()?)))
+                .flatten()
         })
     }
 
-    /// `ChemicalIngredient`: a chemical's id, or `#` and a tag this port doesn't read yet.
+    /// `containsRecipeBA` or `containsRecipeB` for a machine's tank.
+    pub(crate) fn mek_tank_takes(
+        &self,
+        def: &mekmachine_engine::process_table::ProcessDef,
+        chemical: &str,
+        input: Option<&horizon_client::items::ItemStack>,
+    ) -> bool {
+        self.native_recipes_of_type(def.recipes).iter().any(|recipe| {
+            self.native_recipe_chemical_matches(&recipe.json["chemical_input"]["ingredient"], chemical)
+                && input.is_none_or(|input| {
+                    self.native_recipe_ingredient(&recipe.json[process_input_key(def.recipes)]["ingredient"])
+                        .is_some_and(|ingredient| ingredient.test(input))
+                })
+        })
+    }
+
+    /// `ChemicalIngredient`: a chemical's id, or `#` and a tag. `add_machine_content.py` carries each
+    /// of Mekanism's chemical tags as a recipe of type `mekmachine:chemical_tag`, since a hook has no
+    /// way to read a tag registry that Horizon doesn't have.
     pub(crate) fn native_recipe_chemical_matches(&self, ingredient: &serde_json::Value, id: &str) -> bool {
-        ingredient.as_str().is_some_and(|wanted| wanted == id)
+        let Some(wanted) = ingredient.as_str() else {
+            return false;
+        };
+        let Some(tag) = wanted.strip_prefix('#') else {
+            return wanted == id;
+        };
+        self.native_recipes_of_type("mekmachine:chemical_tag").iter().any(|recipe| {
+            recipe.json["tag"].as_str() == Some(tag)
+                && recipe.json["values"].as_array().is_some_and(|values| values.iter().any(|value| value.as_str() == Some(id)))
+        })
+    }
+
+    /// Tells the menu's slot rule what the extra slot of `def` takes, once for each machine kind.
+    pub(crate) fn mek_register_extra_items(&self, def: &mekmachine_engine::process_table::ProcessDef) {
+        thread_local! {
+            static DONE: std::cell::RefCell<std::collections::HashSet<&'static str>> = Default::default();
+        }
+        if !DONE.with_borrow_mut(|done| done.insert(def.block)) {
+            return;
+        }
+        let menu = format!("mekmachine:extra_items:{}", def.block);
+        for item in self.mek_extra_items(def) {
+            let (mut may_place, mut max_stack) = (true, 64);
+            horizon_client::menu::native_menu_slot_rules(&menu, 0, &horizon_client::items::ItemStack::new(&item, 1), &mut may_place, &mut max_stack);
+        }
+    }
+
+    /// What the extra slot of `def` takes: items that convert into its tank, or a recipe's second item.
+    pub(crate) fn mek_extra_items(&self, def: &mekmachine_engine::process_table::ProcessDef) -> Vec<String> {
+        use mekmachine_engine::process_table::Extra;
+        let of = |json: &serde_json::Value| self.native_recipe_ingredient(json).map(|ingredient| ingredient.order).unwrap_or_default();
+        match def.extra {
+            Extra::ByProduct => Vec::new(),
+            Extra::ItemInput => self
+                .native_recipes_of_type(def.recipes)
+                .iter()
+                .flat_map(|recipe| of(&recipe.json["extra_input"]["ingredient"]))
+                .collect(),
+            Extra::Conversion => self
+                .native_recipes_of_type("mekanism:chemical_conversion")
+                .iter()
+                .filter(|recipe| recipe.json["output"]["id"].as_str().is_some_and(|id| self.mek_tank_takes(def, id, None)))
+                .flat_map(|recipe| of(&recipe.json["input"]["ingredient"]))
+                .collect(),
+        }
     }
 
     /// `TileComponentUpgrade.tickServer`.

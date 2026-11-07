@@ -11,5 +11,7 @@ pub mod transmitter_draw;
 pub mod upgrades;
 pub mod transmitter_model;
 pub mod advanced;
+pub mod chemical_table;
+pub mod process_table;
 pub mod build_stamp;
 pub mod tiers;

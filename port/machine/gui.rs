@@ -29,8 +29,6 @@ const SIDE_OUTPUT: u32 = 0x36_6BD0;
 const SIDE_ENERGY: u32 = 0x59_C15F;
 /// `ChemicalConstants.SULFUR_DIOXIDE`. Other chemicals' tints and textures aren't ported.
 const SULFUR_DIOXIDE_TINT: u32 = 0xFFA9_9D90;
-/// `data/mekanism/mekanism/chemical/osmium.json`.
-const OSMIUM_TINT: u32 = 0xFF52_BDCA;
 /// `FluidDeferredRegister.LIQUID`, copied where the atlas looks, and its tile.
 const LIQUID_SPRITE: &str = "mekanism:block/port_liquid";
 const LIQUID_TILE: f32 = 16.0;
@@ -309,39 +307,56 @@ impl Game<'_> {
         self.gui_labels(batch, origin, layout::TITLE_Y);
     }
 
-    /// `GuiAdvancedElectricMachine`, for the Osmium Compressor.
-    pub(crate) fn gui_compressor(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2]) {
-        self.gui_base(batch, data, origin, layout::OXIDIZER_KINDS);
+    /// `GuiAdvancedElectricMachine`, `GuiCombiner`, `GuiPrecisionSawmill` and `GuiMetallurgicInfuser`.
+    pub(crate) fn gui_process(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2], def: &mekmachine_engine::process_table::ProcessDef) {
+        let screen = &def.screen;
+        let kinds = if def.tank > 0 { layout::OXIDIZER_KINDS } else { layout::ELECTRIC_KINDS };
+        self.gui_base(batch, data, origin, kinds);
         let [ox, oy] = origin;
         let get = |slot: usize| data.get(slot).copied().unwrap_or(0);
-        for (slot, path) in [
-            (layout::COMPRESSOR_INPUT, "slot/input"),
-            (layout::COMPRESSOR_OUTPUT, "slot/output"),
-            (layout::COMPRESSOR_ENERGY, "slot/power"),
-            (layout::COMPRESSOR_SECONDARY, "slot/extra"),
-        ] {
-            self.gui_whole(batch, path, [ox + slot[0] - 1.0, oy + slot[1] - 1.0, 18.0, 18.0]);
+        if let Some([fx, fy, fw, fh]) = screen.output_frame {
+            self.gui_nine(batch, "slot/output", [18.0, 18.0], 1.0, [ox + fx, oy + fy, fw, fh], WHITE);
+        } else {
+            self.gui_whole(batch, "slot/output", [ox + screen.output[0] - 1.0, oy + screen.output[1] - 1.0, 18.0, 18.0]);
+        }
+        for (slot, path) in [(screen.input, Some("slot/input")), (screen.energy, Some("slot/power")), (screen.extra, screen.extra_art)] {
+            if let Some(path) = path {
+                self.gui_whole(batch, path, [ox + slot[0] - 1.0, oy + slot[1] - 1.0, 18.0, 18.0]);
+            }
+        }
+        if let Some([ax, ay]) = screen.arrow {
+            let [_, _, aw, ah] = layout::UP_ARROW;
+            self.gui_whole(batch, "arrow/up", [ox + ax, oy + ay, aw, ah]);
+        }
+        if let Some([dx, dy]) = screen.dump {
+            // `GuiDumpButton`'s art. It does nothing here.
+            self.gui_whole(batch, "button/dump", [ox + dx, oy + dy, 21.0, 10.0]);
         }
 
-        let [px, py, pw, ph] = layout::PROGRESS;
-        self.gui_whole(batch, "progress/bar/empty", [ox + px, oy + py, pw, ph]);
+        let [px, py, pw, ph] = screen.progress;
+        self.gui_whole(batch, &format!("progress/{}/empty", screen.progress_art), [ox + px, oy + py, pw, ph]);
         let total = get(mek::DATA_TICKS);
         if get(mek::DATA_PROGRESS) > 0 && total > 0 {
             let share = (get(mek::DATA_PROGRESS) as f32 / total as f32).min(1.0);
-            let filled = layout::progress_size(share, pw - 2.0);
-            self.gui_part(batch, "progress/bar/full", [1.0, 0.0, filled, ph], [ox + px + 1.0, oy + py, filled, ph], WHITE);
+            // `GuiProgress`: only `ProgressType.BAR` starts a pixel in.
+            let inset = if screen.progress_art == "bar" { 1.0 } else { 0.0 };
+            let filled = layout::progress_size(share, pw - 2.0 * inset);
+            self.gui_part(batch, &format!("progress/{}/full", screen.progress_art), [inset, 0.0, filled, ph], [ox + px + inset, oy + py, filled, ph], WHITE);
         }
 
-        let [cx, cy, cw, ch] = layout::COMPRESSOR_BAR;
-        self.gui_nine(batch, "bar/base", [5.0, 5.0], 1.0, [ox + cx, oy + cy, cw, ch], WHITE);
-        let stored = get(chem::DATA_CHEMICAL);
-        if stored > 0 {
-            let level = f64::from(stored) / mekmachine_engine::advanced::TANK_CAPACITY as f64;
-            let filled = layout::bar_size(level.min(1.0), ch - 2.0);
-            self.gui_tile_sprite(batch, LIQUID_SPRITE, [ox + cx + 1.0, oy + cy + ch - 1.0 - filled, cw - 2.0, filled], OSMIUM_TINT);
+        if let Some([cx, cy, cw, ch]) = screen.chemical_bar {
+            self.gui_nine(batch, "bar/base", [5.0, 5.0], 1.0, [ox + cx, oy + cy, cw, ch], WHITE);
+            let stored = get(chem::DATA_CHEMICAL);
+            let held = usize::try_from(get(chem::DATA_CHEMICAL_KIND) - 1).ok().and_then(|at| mekmachine_engine::chemical_table::CHEMICALS.get(at));
+            if stored > 0 && let Some((_, _, tint, sprite)) = held {
+                let level = f64::from(stored) / def.tank as f64;
+                let filled = layout::bar_size(level.min(1.0), ch - 2.0);
+                self.gui_tile_sprite(batch, sprite, [ox + cx + 1.0, oy + cy + ch - 1.0 - filled, cw - 2.0, filled], *tint);
+            }
         }
 
-        let [bx, by, bw, bh] = layout::POWER_BAR;
+        let [bx, _, bw, bh] = layout::POWER_BAR;
+        let by = screen.power_y;
         self.gui_nine(batch, "bar/base", [5.0, 5.0], 1.0, [ox + bx, oy + by, bw, bh], WHITE);
         let capacity = wide(data, mek::DATA_CAPACITY, mek::DATA_CAPACITY_HIGH).max(1);
         let level = (wide(data, mek::DATA_ENERGY, mek::DATA_ENERGY_HIGH) as f64 / capacity as f64).min(1.0);
@@ -591,15 +606,20 @@ impl Game<'_> {
             wide(data, mek::DATA_CAPACITY, mek::DATA_CAPACITY_HIGH),
         );
         let oxidizer = block == chem::OXIDIZER;
-        if on(if oxidizer { layout::OXIDIZER_POWER_BAR } else { layout::POWER_BAR }) {
+        let [bx, _, bw, bh] = layout::POWER_BAR;
+        let power_y = mekmachine_engine::process_table::process(block).map_or(layout::POWER_BAR[1], |def| def.screen.power_y);
+        if on(if oxidizer { layout::OXIDIZER_POWER_BAR } else { [bx, power_y, bw, bh] }) {
             lines.push(layout::energy_fraction(energy, capacity));
         }
         let [ex, ey] = layout::ENERGY_TAB;
         if on([ex, ey, layout::TAB_SIZE, layout::TAB_SIZE]) {
             lines.extend(layout::energy_tab_lines(wide(data, mek::DATA_USING, mek::DATA_USING_HIGH), (capacity - energy).max(0)));
         }
-        if block == mek::COMPRESSOR && on(layout::COMPRESSOR_BAR) {
-            lines.extend(layout::gauge_lines((get(chem::DATA_CHEMICAL) > 0).then_some("Osmium"), get(chem::DATA_CHEMICAL)));
+        if let Some(bar) = mekmachine_engine::process_table::process(block).and_then(|def| def.screen.chemical_bar)
+            && on(bar)
+        {
+            let held = usize::try_from(get(chem::DATA_CHEMICAL_KIND) - 1).ok().and_then(|at| mekmachine_engine::chemical_table::CHEMICALS.get(at));
+            lines.extend(layout::gauge_lines(held.map(|(_, name, ..)| *name), get(chem::DATA_CHEMICAL)));
         }
         if oxidizer && on(layout::OXIDIZER_GAUGE) {
             let kind = usize::try_from(get(chem::DATA_CHEMICAL_KIND) - 1).ok();
