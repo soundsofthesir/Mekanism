@@ -1,8 +1,9 @@
 """Starts a game for a test and runs commands in it, as single player or a dedicated server.
 
 `run_test` wraps a test's body. It stops every game the test started, even on failure, and exits
-with `LAUNCH_CRASH_EXIT` if the game died before the test called `begin_checks`. `run_tests.py`
-retries such a group once. A failure after `begin_checks` is never reported as a launch crash.
+with `LAUNCH_FAILURE_EXIT` if the launch failed or the game died before the test called
+`begin_checks`, whether or not a crash report exists. `run_tests.py` retries such a group once. A
+failure after `begin_checks` is never reported as a launch failure.
 """
 
 import http.client
@@ -30,7 +31,7 @@ WORLD = "W"
 PORT = "25599"
 SEED = "2024"
 DATAPACK_FORMAT = 121
-LAUNCH_CRASH_EXIT = 75
+LAUNCH_FAILURE_EXIT = 75
 CHECKS_BEGIN = "CHECKS BEGIN"
 LOG_TAIL_LINES = 15
 CRASH_REPORTS = Path.home() / "Library/Logs/DiagnosticReports"
@@ -41,6 +42,10 @@ API_ENDPOINT = ".horizon/api.json"
 
 class TestFailure(Exception):
     pass
+
+
+class LaunchFailure(TestFailure):
+    """The command that starts the game failed. A plain failure once the checks have begun."""
 
 
 _checks_begun = False
@@ -60,8 +65,19 @@ def run(args: list, env: dict, cwd: Path | None = None) -> str:
         timeout=TIMEOUT_SECONDS,
     )
     if done.returncode != 0:
-        raise TestFailure(f"{args[0]} {args[1:5]}: {done.stdout}{done.stderr}")
+        raise TestFailure(
+            f"{args[0]} {args[1:5]}: exit status {done.returncode}, "
+            f"stdout {done.stdout.strip()!r}, stderr {done.stderr.strip()!r}"
+        )
     return done.stdout
+
+
+def launching(start: Callable[[], object]) -> None:
+    """Runs the commands that start a game, and reports any way they fail as a launch failure."""
+    try:
+        start()
+    except (TestFailure, subprocess.TimeoutExpired, json.JSONDecodeError) as failure:
+        raise LaunchFailure(str(failure)) from failure
 
 
 def scratch_env(folder: Path, traces: dict[str, Path]) -> dict:
@@ -149,10 +165,10 @@ class SinglePlayer:
 
     def start(self) -> None:
         self.close_link()
-        self.ctl(
+        launching(lambda: self.ctl(
             "launch", "--world", WORLD, "--seed", SEED, "--creative", "--offscreen", "--wait",
             "--game", self.engine, "--resources", RESOURCES, "--game-dir", self.game_dir,
-        )
+        ))
 
     def stop(self) -> None:
         self.close_link()
@@ -213,9 +229,8 @@ class DedicatedServer:
 
     def start(self) -> None:
         self.api = None
-        self.server("start")
         # `cmd` waits for a game that is still starting, so the first command takes that path.
-        self.server("cmd", "list")
+        launching(lambda: (self.server("start"), self.server("cmd", "list")))
         endpoint = json.loads((self.dir / API_ENDPOINT).read_text())
         host, port = endpoint["address"].rsplit(":", 1)
         self.api = http.client.HTTPConnection(host, int(port), timeout=TIMEOUT_SECONDS)
@@ -268,15 +283,15 @@ def run_test(make_world: Callable[[Path], object], body: Callable[[object], None
         world = make_world(folder)
         body(world)
     except Exception as failure:
-        crashed = not _checks_begun and not game_alive(folder)
+        crashed = not _checks_begun and (isinstance(failure, LaunchFailure) or not game_alive(folder))
         if not crashed and world is not None:
             try:
                 world.stop()
             except Exception as stopping:
                 print(f"stopping the game after the failure: {stopping}", file=sys.stderr)
         if crashed:
-            print(f"LAUNCH CRASH: {failure}\n{crash_report_since(began)}\n{log_tail(folder)}")
-            return LAUNCH_CRASH_EXIT
+            print(f"LAUNCH FAILURE: {failure}\n{crash_report_since(began)}\n{log_tail(folder)}")
+            return LAUNCH_FAILURE_EXIT
         kind = "" if isinstance(failure, TestFailure) else f"{type(failure).__name__}: "
         print(f"FAIL: {kind}{failure}\nFiles kept in {folder}", file=sys.stderr)
         return 1

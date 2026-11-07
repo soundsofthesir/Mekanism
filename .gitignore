@@ -4,3 +4,4 @@ target/
 probe/.run/
 port/.work/
 __pycache__/
+port/machine/engine/src/build_stamp.rs

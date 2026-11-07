@@ -155,6 +155,17 @@ def check_window(world, origin, art: Path, folder: Path, scale: int) -> None:
     expect("taken from the output slot", carried(world) is not None, True)
     click(world, *in_window(origin, INPUT_FRAME))
     wait_installed(world, 4)
+
+    # The real mod saves no `upgrades` with nothing installed, as `reload_output_slot` shows.
+    click(world, *in_window(origin, LIST_ROW))
+    for _ in range(4):
+        click(world, *in_window(origin, UNINSTALL))
+    nbt = text(world, f"data get block 0 {Y} 0")
+    expect("no saved upgrades once all are uninstalled", "component_upgrade" in nbt, False)
+    expect("all in the output slot", features.slot_of(nbt, 4), "mekanism:upgradex4")
+    click(world, *in_window(origin, OUTPUT_FRAME))
+    click(world, *in_window(origin, INPUT_FRAME))
+    wait_installed(world, 4)
     click(world, origin[0] + WINDOW[0] + CLOSE[0], origin[1] + WINDOW[1] + CLOSE[1])
     expect("upgrade slot closed again", widget_at(world, 303)[0] < 0, True)
 

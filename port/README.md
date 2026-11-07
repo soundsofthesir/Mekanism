@@ -35,6 +35,8 @@ python3 port/run_tests.py --list
 python3 port/run_tests.py --changed main --dry-run
 ```
 
+The build writes `machine/engine/src/build_stamp.rs`, which isn't in git, and checks that the exported engine holds this source's hash, forcing a real rebuild if not. `run_tests.py` refuses an engine that isn't the current source, and keeps a failed group's evidence in `.work/failures/`. `port/test_engine.sh` writes the stamp too, since the crate needs it.
+
 `port/prune_server_builds.py` runs after each build and leaves only the newest server build of `mekmachine` in the launcher's folder. `python3 port/test_run_tests.py` tests the runner and the prune and needs no game.
 
 Use `--all` before a merge. `python3 port/gen_transmitter_model.py upstream` regenerates `machine/engine/src/transmitter_model.rs` from Mekanism's OBJ models.
