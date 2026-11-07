@@ -11,14 +11,16 @@ fn mekmachine_chemicals(
     use mekmachine_engine::furnace::Stack;
     use mekmachine_engine::recipe_machine::{Machine, Recipe, Recipes};
 
-    match entity.id.as_str() {
-        chem::TUBE => {
+    let id = entity.id.clone();
+    match id.as_str() {
+        tube if chem::is_tube(tube) => {
             game.chem_register_tube(pos);
             return;
         }
-        chem::TANK => {
-            let mut tank = chem::read_tank(&entity.nbt, chemical::BASIC_TANK_CAPACITY);
-            game.chem_eject(pos, &entity.nbt, &mut tank, chemical::BASIC_TANK_RATE);
+        tank if chem::is_tank(tank) => {
+            let rate = mekmachine_engine::tiers::value_of(tank, chem::TANK_KIND, &mekmachine_engine::tiers::TANK_RATE).unwrap_or(0);
+            let mut tank = chem::read_tank(&entity.nbt, chem::tank_capacity(&entity.id));
+            game.chem_eject(pos, &entity.nbt, &mut tank, rate);
             chem::write_tank(&mut entity.nbt, &tank);
             return;
         }
@@ -54,7 +56,7 @@ fn mekmachine_chemicals(
     const INPUT: usize = 0;
     const SLOTS: usize = crate::game::mek::MACHINE_SLOTS;
     game.mek_tick_upgrades(entity);
-    game.mek_fill_energy_slot(entity);
+    game.mek_fill_energy_slot(entity, crate::game::mek::ENERGY_SLOT, i64::MAX);
     let stack = entity
         .items
         .get(INPUT)

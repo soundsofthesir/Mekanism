@@ -7,14 +7,32 @@ use horizon_world::nbt::{Compound, JavaString, Tag};
 use mekmachine_engine::split::split;
 use std::{cell::RefCell, collections::HashMap};
 
-pub(crate) const CUBE: &str = "mekanism:basic_energy_cube";
-pub(crate) const CABLE: &str = "mekanism:basic_universal_cable";
+use mekmachine_engine::tiers;
+
+const CUBE_KIND: &str = "energy_cube";
+const CABLE_KIND: &str = "universal_cable";
+
+pub(crate) fn is_cube(block: &str) -> bool {
+    tiers::tier_of(block, CUBE_KIND).is_some()
+}
+
+pub(crate) fn is_cable(block: &str) -> bool {
+    tiers::tier_of(block, CABLE_KIND).is_some()
+}
+
+/// A cable's share of its network's capacity. Cables of different tiers join.
+fn cable_capacity(block: &str) -> i64 {
+    tiers::value_of(block, CABLE_KIND, &tiers::CABLE_CAPACITY).unwrap_or(0)
+}
+
+pub(crate) fn cube_capacity(block: &str) -> Option<i64> {
+    tiers::value_of(block, CUBE_KIND, &tiers::CUBE_CAPACITY)
+}
+
+pub(crate) fn cube_rate(block: &str) -> i64 {
+    tiers::value_of(block, CUBE_KIND, &tiers::CUBE_RATE).unwrap_or(0)
+}
 pub(crate) const GENERATOR: &str = "mekanismgenerators:heat_generator";
-/// `EnergyCubeTier.BASIC`.
-pub(crate) const CUBE_CAPACITY: i32 = 4_000_000;
-pub(crate) const CUBE_RATE: i32 = 4_000;
-/// `CableTier.BASIC`: each cable adds this to its network's capacity.
-const CABLE_CAPACITY: i64 = 8_000;
 /// `GeneratorsStorageConfig.heatGenerator`.
 pub(crate) const GENERATOR_CAPACITY: i32 = 240;
 /// `heatTankCapacity`.
@@ -46,10 +64,14 @@ pub(crate) fn has_block_entity(block: &str) -> bool {
     matches!(
         block,
         "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter"
-    ) || block == CUBE
-        || block == CABLE
+    ) || is_cube(block)
+        || is_cable(block)
         || block == GENERATOR
-        || matches!(block, super::chem::OXIDIZER | super::chem::TUBE | super::chem::TANK)
+        || block == super::chem::OXIDIZER
+        || super::chem::is_tube(block)
+        || super::chem::is_tank(block)
+        || super::pipe::is_pipe(block)
+        || super::pipe::is_tank(block)
 }
 
 /// The side config a block's item gives it when placed (`AttachedSideConfig`). The real mod applies
@@ -58,11 +80,11 @@ pub(crate) fn default_config(block: &str) -> Compound {
     if block == super::chem::OXIDIZER {
         return chemical_out_config();
     }
-    if block == super::chem::TANK {
+    if super::chem::is_tank(block) {
         return chemical_tank_config();
     }
     let (energy, items): ([i32; 6], [i32; 6]) = match block {
-        CUBE => (CUBE_ENERGY_SIDES, CUBE_ITEM_SIDES),
+        cube if is_cube(cube) => (CUBE_ENERGY_SIDES, CUBE_ITEM_SIDES),
         "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" => {
             ([SIDE_INPUT; 6], MACHINE_ITEM_SIDES)
         }
@@ -71,7 +93,7 @@ pub(crate) fn default_config(block: &str) -> Compound {
     let mut config = Compound::new();
     config.insert(JavaString::from(ENERGY_CONFIG), Tag::IntArray(energy.to_vec()));
     config.insert(JavaString::from(ITEM_CONFIG), Tag::IntArray(items.to_vec()));
-    if block == CUBE {
+    if is_cube(block) {
         config.insert(JavaString::from("eject0"), Tag::Byte(1));
     }
     let mut nbt = Compound::new();
@@ -127,6 +149,10 @@ pub(crate) const UPGRADE_INPUT: usize = 3;
 pub(crate) const UPGRADE_OUTPUT: usize = 4;
 pub(crate) const MACHINE_SLOTS: usize = 5;
 pub(crate) const ENERGY_SLOT: usize = 2;
+/// `TileEntityEnergyCube`'s slots.
+pub(crate) const CUBE_DISCHARGE: usize = 0;
+pub(crate) const CUBE_CHARGE: usize = 1;
+pub(crate) const CUBE_SLOTS: usize = 2;
 pub(crate) const ENERGY_TABLET: &str = "mekanism:energy_tablet";
 pub(crate) const UPGRADE_COMPONENT: &str = "mekanism:upgrade_type";
 pub(crate) const UPGRADE_ITEM: &str = "mekanism:upgrade";
@@ -145,6 +171,8 @@ pub(crate) const BUTTONS_PER_ROW: i32 = 6;
 pub(crate) const ITEM_SIDE_CYCLE: [i32; 4] = [0, SIDE_INPUT, SIDE_OUTPUT, SIDE_ENERGY];
 pub(crate) const ENERGY_SIDE_CYCLE: [i32; 2] = [0, SIDE_INPUT];
 pub(crate) const CHEMICAL_SIDE_CYCLE: [i32; 2] = [0, SIDE_OUTPUT];
+/// A cube's items and energy, each with an input and an output (`setupIOConfig`).
+pub(crate) const CUBE_SIDE_CYCLE: [i32; 3] = [0, SIDE_INPUT, SIDE_OUTPUT];
 
 /// The bits above a packed side config in a data slot: whether that kind ejects.
 pub(crate) const EJECT_BIT: i32 = 12;
@@ -380,6 +408,8 @@ thread_local! {
     /// The cables of each level, in the order they first ticked, which is where a network's
     /// targets get their order. A broken cable leaves when a network is next built.
     static CABLES: RefCell<HashMap<String, Vec<[i32; 3]>>> = RefCell::new(HashMap::new());
+    /// The cables whose network has ticked, so whose network has formed.
+    static FORMED: RefCell<HashMap<String, Vec<[i32; 3]>>> = RefCell::new(HashMap::new());
 }
 
 impl Game<'_> {
@@ -394,8 +424,9 @@ impl Game<'_> {
     ) {
         use mekmachine_engine::transmitter_draw::{self as plan, Part, SIDES as SIDE_NAMES};
         use mekmachine_engine::transmitter_model::{CONTENTS, SMALL};
-        const SIDE: &str = "mekanism:block/models/multipart/basic_universal_cable_vertical";
-        const CENTRE: &str = "mekanism:block/models/multipart/basic_universal_cable";
+        let tier = tiers::tier_of(&entity.id, CABLE_KIND).map_or(tiers::TIERS[0], |tier| tiers::TIERS[tier]);
+        let centre_sprite = format!("mekanism:block/models/multipart/{tier}_universal_cable");
+        let side_sprite = format!("{centre_sprite}_vertical");
         const ENERGY: &str = "mekanism:block/port_energy";
         const WHITE: u32 = 0xFF_FFFF;
         const FULL_BRIGHT: u32 = 240 | 240 << 8;
@@ -413,12 +444,12 @@ impl Game<'_> {
                 draw.rotate_about(axis, plan::CONTIGUOUS_DEGREES, PIVOT);
             }
             for face in found.faces {
-                let sprite = if face.centre && !centre_as_side { CENTRE } else { SIDE };
+                let sprite: &str = if face.centre && !centre_as_side { &centre_sprite } else { &side_sprite };
                 self.native_draw_quad(draw, sprite, face.corners, face.uv, WHITE);
             }
             draw.pop();
         }
-        let scale = plan::contents_scale(energy_of(&entity.nbt), CABLE_CAPACITY);
+        let scale = plan::contents_scale(energy_of(&entity.nbt), cable_capacity(&entity.id));
         if scale <= 0.0 {
             return;
         }
@@ -454,7 +485,7 @@ impl Game<'_> {
 
     /// Whether a block uses `gui.rs`'s screen.
     pub(crate) fn mek_has_machine_screen(block: &str) -> bool {
-        Self::mek_is_machine(block) || block == super::chem::OXIDIZER
+        Self::mek_is_machine(block) || block == super::chem::OXIDIZER || is_cube(block)
     }
 
     pub(crate) fn mek_is_machine(block: &str) -> bool {
@@ -506,7 +537,7 @@ impl Game<'_> {
     }
 
     fn mek_is_cable(&self, pos: [i32; 3]) -> bool {
-        self.mek_saved(pos).is_some_and(|(id, _)| id == CABLE)
+        self.mek_saved(pos).is_some_and(|(id, _)| is_cable(id))
     }
 
     pub(crate) fn mek_register_cable(&self, pos: [i32; 3]) {
@@ -574,6 +605,10 @@ impl Game<'_> {
             .then(|| upgrades_of(nbt).recalculated_capacity(usage, ticks))
     }
 
+    fn mek_cable_capacities(&self, cables: &[[i32; 3]]) -> Vec<i64> {
+        cables.iter().map(|at| self.mek_saved(*at).map_or(0, |(id, _)| cable_capacity(id))).collect()
+    }
+
     fn mek_write_cable(&mut self, pos: [i32; 3], energy: i64) {
         let key = (pos[0], pos[1], pos[2]);
         let mut seen_change = false;
@@ -584,7 +619,8 @@ impl Game<'_> {
             entity.nbt.insert(JavaString::from("energy"), Tag::Long(energy));
             self.world.modified.insert((key.0 >> 4, key.2 >> 4));
             // `MekanismUtils.scaleChanged`: clients hear of a change of 1% of the capacity or more.
-            seen_change = before * 100 / CABLE_CAPACITY != energy * 100 / CABLE_CAPACITY;
+            let capacity = cable_capacity(&entity.id).max(1);
+            seen_change = before * 100 / capacity != energy * 100 / capacity;
         }
         if seen_change {
             self.native_block_entity_sync(pos);
@@ -596,9 +632,13 @@ impl Game<'_> {
         let Some((id, nbt)) = self.mek_saved(pos) else {
             return 0;
         };
-        if id == CABLE {
-            let cables = self.mek_network(pos);
-            let capacity = cables.len() as i64 * CABLE_CAPACITY;
+        if is_cable(id) {
+            // A cable whose network hasn't formed yet offers only its own capacity, as the recording
+            // of mixed tiers shows on its first tick.
+            let dimension = self.dim.id().to_owned();
+            let formed = FORMED.with_borrow(|formed| formed.get(&dimension).is_some_and(|level| level.contains(&pos)));
+            let cables = if formed { self.mek_network(pos) } else { vec![pos] };
+            let capacity = self.mek_cable_capacities(&cables).iter().sum::<i64>();
             return (capacity - self.mek_network_energy(&cables)).max(0);
         }
         let facing = self.mek_facing(pos);
@@ -658,7 +698,7 @@ impl Game<'_> {
         let Some((id, nbt)) = self.mek_saved(pos) else {
             return false;
         };
-        if id == CABLE {
+        if is_cable(id) {
             return true;
         }
         if id == GENERATOR {
@@ -694,7 +734,7 @@ impl Game<'_> {
         let known = CABLES.with_borrow(|cables| cables.get(&dimension).cloned().unwrap_or_default());
         let live: Vec<[i32; 3]> = known.into_iter().filter(|at| self.mek_is_cable(*at)).collect();
         CABLES.with_borrow_mut(|cables| {
-            cables.insert(dimension, live.clone());
+            cables.insert(dimension.clone(), live.clone());
         });
         let mut done: Vec<[i32; 3]> = Vec::new();
         for start in &live {
@@ -708,6 +748,9 @@ impl Game<'_> {
                 live.iter().copied().filter(|at| joined.contains(at)).collect();
             self.mek_tick_network(&cables);
         }
+        FORMED.with_borrow_mut(|formed| {
+            formed.insert(dimension, live);
+        });
     }
 
     fn mek_tick_network(&mut self, cables: &[[i32; 3]]) {
@@ -723,7 +766,7 @@ impl Game<'_> {
         let held = self.mek_network_energy(cables);
         let sent = self.mek_send(&targets, held);
         let left = held - sent;
-        let room = vec![CABLE_CAPACITY; cables.len()];
+        let room = self.mek_cable_capacities(cables);
         for (cable, share) in cables.iter().zip(split(left, &room)) {
             self.mek_write_cable(*cable, share);
         }
@@ -755,18 +798,18 @@ impl Game<'_> {
 
     /// `EnergyInventorySlot.fillContainerOrConvert`: from a charged item, or else from a conversion
     /// recipe, which only runs if all of its energy fits.
-    pub(crate) fn mek_fill_energy_slot(&self, entity: &mut horizon_client::containers::ModBlockEntity) {
-        let Some(stack) = entity.items.get(ENERGY_SLOT).cloned().flatten() else {
+    pub(crate) fn mek_fill_energy_slot(&self, entity: &mut horizon_client::containers::ModBlockEntity, slot: usize, rate: i64) {
+        let Some(stack) = entity.items.get(slot).cloned().flatten() else {
             return;
         };
         let capacity = Self::mek_capacity(&entity.id, &entity.nbt);
         let held = energy_of(&entity.nbt);
         let room = (capacity - held).max(0);
         if room > 0
-            && let Some((moved, left)) = self.native_item_energy_extract(&stack, room.min(i64::from(i32::MAX)) as i32)
+            && let Some((moved, left)) = self.native_item_energy_extract(&stack, room.min(rate).min(i64::from(i32::MAX)) as i32)
             && moved > 0
         {
-            entity.items[ENERGY_SLOT] = Some(left);
+            entity.items[slot] = Some(left);
             entity.nbt.insert(JavaString::from("energy"), Tag::Int((held + i64::from(moved)) as i32));
             return;
         }
@@ -781,7 +824,7 @@ impl Game<'_> {
             }
             let output = recipe.json["output"].as_i64().unwrap_or(0);
             if output <= room {
-                entity.items[ENERGY_SLOT] = (stack.count > needed).then(|| horizon_client::items::ItemStack {
+                entity.items[slot] = (stack.count > needed).then(|| horizon_client::items::ItemStack {
                     count: stack.count - needed,
                     ..stack.clone()
                 });
@@ -791,9 +834,28 @@ impl Game<'_> {
         }
     }
 
+    /// `EnergyInventorySlot.drainContainerIntoSlot`.
+    pub(crate) fn mek_charge_slot(&self, entity: &mut horizon_client::containers::ModBlockEntity, slot: usize, rate: i64) {
+        let Some(stack) = entity.items.get(slot).cloned().flatten() else {
+            return;
+        };
+        let held = energy_of(&entity.nbt);
+        let wanted = held.min(rate).min(i64::from(i32::MAX)) as i32;
+        if wanted <= 0 {
+            return;
+        }
+        if let Some((moved, charged)) = self.native_item_energy_insert(&stack, wanted)
+            && moved > 0
+        {
+            entity.items[slot] = Some(charged);
+            entity.nbt.insert(JavaString::from("energy"), Tag::Int((held - i64::from(moved)) as i32));
+        }
+    }
+
     /// What a machine holds at most right now.
     pub(crate) fn mek_capacity(id: &str, nbt: &Compound) -> i64 {
-        Self::mek_upgraded_capacity(id, nbt)
+        cube_capacity(id)
+            .or_else(|| Self::mek_upgraded_capacity(id, nbt))
             .or_else(|| Self::mek_usage_and_ticks(id).map(|(usage, ticks)| Upgrades::default().capacity(usage, ticks)))
             .unwrap_or(0)
     }

@@ -23,10 +23,10 @@ fn mekmachine_energy(block: &str, energy: &mut Option<horizon_client::containers
         extract_faces: NONE,
     };
     match block {
-        crate::game::mek::CUBE => {
+        cube if crate::game::mek::is_cube(cube) => {
             *energy = Some(ModEnergyBuffer {
-                capacity: crate::game::mek::CUBE_CAPACITY,
-                max_insert: crate::game::mek::CUBE_RATE,
+                capacity: crate::game::mek::cube_capacity(cube).unwrap_or(0) as i32,
+                max_insert: crate::game::mek::cube_capacity(cube).unwrap_or(0) as i32,
                 max_extract: 0,
                 insert_faces: ALL,
                 extract_faces: NONE,

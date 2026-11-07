@@ -13,6 +13,17 @@ fn mekmachine_container(block: &str, container: &mut Option<horizon_client::cont
         });
         return;
     }
+    if crate::game::mek::is_cube(block) {
+        use crate::game::mek::{CUBE_CHARGE, CUBE_DISCHARGE, CUBE_SLOTS};
+        *container = Some(horizon_client::containers::ModContainer {
+            slots: CUBE_SLOTS,
+            faces: std::array::from_fn(|_| vec![CUBE_DISCHARGE, CUBE_CHARGE]),
+            inputs: vec![CUBE_DISCHARGE, CUBE_CHARGE],
+            outputs: vec![],
+            menu: Some(block.to_owned()),
+        });
+        return;
+    }
     if block == crate::game::chem::OXIDIZER {
         const INPUT: usize = 0;
         const CHEMICAL_ITEM: usize = 1;

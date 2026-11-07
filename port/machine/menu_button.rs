@@ -24,6 +24,7 @@ fn mekmachine_menu_button(
         game.mek_uninstall(entity, (id - UNINSTALL_ALL) as usize, true);
         return;
     }
+    let cube = mek::is_cube(&entity.id);
     let nbt = &mut entity.nbt;
     if id == REDSTONE_NEXT || id == REDSTONE_PREVIOUS {
         mek::cycle_control(nbt, id == REDSTONE_NEXT);
@@ -31,6 +32,8 @@ fn mekmachine_menu_button(
     }
     let config_of = |kind: usize| {
         match kind {
+            ENERGY_KIND if cube => (mek::ENERGY_CONFIG, &mek::CUBE_SIDE_CYCLE[..], mek::ENERGY_EJECT),
+            _ if cube => (mek::ITEM_CONFIG, &mek::CUBE_SIDE_CYCLE[..], mek::ITEM_EJECT),
             ENERGY_KIND => (mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE[..], mek::ENERGY_EJECT),
             CHEMICAL_KIND => (chem::CHEMICAL_CONFIG, &mek::CHEMICAL_SIDE_CYCLE[..], chem::EJECT),
             _ => (mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE[..], mek::ITEM_EJECT),

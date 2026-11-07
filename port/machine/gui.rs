@@ -32,6 +32,8 @@ const SULFUR_DIOXIDE_TINT: u32 = 0xFFA9_9D90;
 /// `FluidDeferredRegister.LIQUID`, copied where the atlas looks, and its tile.
 const LIQUID_SPRITE: &str = "mekanism:block/port_liquid";
 const LIQUID_TILE: f32 = 16.0;
+/// `MekanismRenderer.energyIcon`, copied where the atlas looks.
+const ENERGY_SPRITE: &str = "mekanism:block/port_energy";
 
 thread_local! {
     /// The kind the open side config window shows. The window is the client's own, as in the real mod.
@@ -45,6 +47,8 @@ thread_local! {
     /// Whether the upgrade window is open, and the kind its list has selected.
     static UPGRADES_OPEN: Cell<bool> = const { Cell::new(false) };
     static SELECTED_UPGRADE: Cell<Option<usize>> = const { Cell::new(None) };
+    /// Whether the open screen is a cube's, whose sides cycle differently.
+    static CUBE: Cell<bool> = const { Cell::new(false) };
     /// What the upgrade window's slots hold and the cursor carries, from the frame's start. The
     /// window draws over items, so it draws these again.
     static WINDOW_ITEMS: RefCell<([Option<ItemStack>; 2], Option<ItemStack>)> =
@@ -226,6 +230,7 @@ impl Game<'_> {
     fn gui_base(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2], kinds: &'static [usize]) {
         ORIGIN.set(origin);
         KINDS.set(kinds);
+        CUBE.set(false);
         DATA.with_borrow_mut(|saved| data.clone_into(saved));
         let [ox, oy] = origin;
         self.gui_panel(batch, [ox, oy, layout::SCREEN_WIDTH, layout::SCREEN_HEIGHT]);
@@ -240,12 +245,17 @@ impl Game<'_> {
     }
 
     fn gui_tabs(&self, batch: &mut HudBatch, origin: [f32; 2]) {
+        self.gui_tab(batch, origin, layout::UPGRADE_TAB, "button/upgrade", TAB_PLAIN);
+        self.gui_tab(batch, origin, layout::XP_TAB, "tab/xp_containment", TAB_XP);
+        self.gui_common_tabs(batch, origin);
+    }
+
+    /// The tabs a block without upgrades has too.
+    fn gui_common_tabs(&self, batch: &mut HudBatch, origin: [f32; 2]) {
         let [ox, oy] = origin;
         self.gui_tab(batch, origin, layout::SIDE_CONFIG_TAB, "button/configuration", TAB_PLAIN);
         self.gui_tab(batch, origin, layout::TRANSPORTER_TAB, "button/transporter_config", TAB_PLAIN);
-        self.gui_tab(batch, origin, layout::UPGRADE_TAB, "button/upgrade", TAB_PLAIN);
         self.gui_tab(batch, origin, layout::SECURITY_TAB, "security/public", TAB_SECURITY);
-        self.gui_tab(batch, origin, layout::XP_TAB, "tab/xp_containment", TAB_XP);
         let icon = DATA.with_borrow(|data| control_sprite(data));
         self.gui_tab(batch, origin, layout::REDSTONE_TAB, icon, TAB_REDSTONE);
         let [ex, ey] = layout::ENERGY_TAB;
@@ -294,6 +304,27 @@ impl Game<'_> {
             self.gui_tile(batch, "bar/vertical_power", [0.0, 0.0, 2.0, 2.0], dst, WHITE);
         }
         self.gui_tabs(batch, origin);
+        self.gui_labels(batch, origin, layout::TITLE_Y);
+    }
+
+    /// `GuiEnergyCube`.
+    pub(crate) fn gui_cube(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2]) {
+        self.gui_base(batch, data, origin, layout::ELECTRIC_KINDS);
+        CUBE.set(true);
+        let [ox, oy] = origin;
+        for (slot, path) in layout::CUBE_SLOTS.into_iter().zip(["slot/input", "slot/output"]) {
+            self.gui_whole(batch, path, [ox + slot[0] - 1.0, oy + slot[1] - 1.0, 18.0, 18.0]);
+        }
+        let [gx, gy, gw, gh] = layout::CUBE_GAUGE;
+        self.gui_nine(batch, "gauge/normal", [5.0, 5.0], 2.0, [ox + gx, oy + gy, gw, gh], WHITE);
+        let energy = wide(data, mek::DATA_ENERGY, mek::DATA_ENERGY_HIGH);
+        let capacity = wide(data, mek::DATA_CAPACITY, mek::DATA_CAPACITY_HIGH);
+        let level = layout::gauge_level(energy, capacity, (gh - 2.0) as i32) as f32;
+        if level > 0.0 {
+            self.gui_tile_sprite(batch, ENERGY_SPRITE, [ox + gx + 1.0, oy + gy + gh - 1.0 - level, gw - 2.0, level], WHITE);
+        }
+        self.gui_part(batch, "gauge/overlay/wide", [0.0, 0.0, gw - 2.0, gh - 2.0], [ox + gx + 1.0, oy + gy + 1.0, gw - 2.0, gh - 2.0], WHITE);
+        self.gui_common_tabs(batch, origin);
         self.gui_labels(batch, origin, layout::TITLE_Y);
     }
 
@@ -550,6 +581,9 @@ fn sides_slot(kind: usize) -> usize {
 /// A side's saved value, from a data slot's 2 bits a side.
 fn side_of(packed: i32, kind: usize, index: usize) -> i32 {
     let position = mek::unpack_side(packed, index);
+    if CUBE.get() {
+        return mek::CUBE_SIDE_CYCLE[position.min(mek::CUBE_SIDE_CYCLE.len() - 1)];
+    }
     match kind {
         layout::ITEM_KIND => mek::ITEM_SIDE_CYCLE[position],
         layout::CHEMICAL_KIND => mek::CHEMICAL_SIDE_CYCLE[position & 1],

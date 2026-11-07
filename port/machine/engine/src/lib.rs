@@ -10,3 +10,4 @@ pub mod gui_layout;
 pub mod transmitter_draw;
 pub mod upgrades;
 pub mod transmitter_model;
+pub mod tiers;

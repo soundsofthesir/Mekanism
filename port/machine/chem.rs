@@ -5,12 +5,25 @@ use super::mek::{DIRECTIONS, SIDE_INPUT, SIDE_OUTPUT, offset, opposite, relative
 use horizon_core::geometry::Direction;
 use horizon_world::nbt::{Compound, JavaString, Tag};
 use mekmachine_engine::chemical::{self, Chem, Tank};
+use mekmachine_engine::tiers;
 use mekmachine_engine::split::split;
 use std::{cell::RefCell, collections::HashMap};
 
 pub(crate) const OXIDIZER: &str = "mekanism:chemical_oxidizer";
-pub(crate) const TUBE: &str = "mekanism:basic_pressurized_tube";
-pub(crate) const TANK: &str = "mekanism:basic_chemical_tank";
+const TUBE_KIND: &str = "pressurized_tube";
+pub(crate) const TANK_KIND: &str = "chemical_tank";
+
+pub(crate) fn is_tube(block: &str) -> bool {
+    tiers::tier_of(block, TUBE_KIND).is_some()
+}
+
+pub(crate) fn is_tank(block: &str) -> bool {
+    tiers::tier_of(block, TANK_KIND).is_some()
+}
+
+fn tube_capacity(block: &str) -> i64 {
+    tiers::value_of(block, TUBE_KIND, &tiers::TUBE_CAPACITY).unwrap_or(0)
+}
 /// `chemical.mekanism.*` in `en_us.json`, for what `oxidizing` recipes make. The menu sends a place
 /// in this list, plus one, because its data slots hold numbers.
 pub(crate) const OXIDIZED: [(&str, &str); 9] = [
@@ -102,7 +115,7 @@ pub(crate) fn tank_capacity(block: &str) -> i64 {
     if block == OXIDIZER {
         chemical::OXIDIZER_CAPACITY
     } else {
-        chemical::BASIC_TANK_CAPACITY
+        tiers::value_of(block, TANK_KIND, &tiers::TANK_CAPACITY).unwrap_or(0)
     }
 }
 
@@ -124,10 +137,12 @@ pub(crate) fn eject_sides(nbt: &Compound, facing: Direction) -> Vec<Direction> {
 thread_local! {
     /// The tubes of each level, in the order they first ticked.
     static TUBES: RefCell<HashMap<String, Vec<[i32; 3]>>> = RefCell::new(HashMap::new());
+    /// The tubes whose network has ticked, so whose network has formed.
+    static FORMED: RefCell<HashMap<String, Vec<[i32; 3]>>> = RefCell::new(HashMap::new());
 }
 
 impl Game<'_> {
-    fn chem_saved(&self, pos: [i32; 3]) -> Option<(&str, &Compound)> {
+    pub(crate) fn chem_saved(&self, pos: [i32; 3]) -> Option<(&str, &Compound)> {
         match self.world.block_entities.get(&(pos[0], pos[1], pos[2])) {
             Some(horizon_client::containers::BlockEntity::Mod(entity)) if !entity.id.is_empty() => {
                 Some((entity.id.as_str(), &entity.nbt))
@@ -136,7 +151,7 @@ impl Game<'_> {
         }
     }
 
-    fn chem_edit<R>(&mut self, pos: [i32; 3], edit: impl FnOnce(&mut Compound) -> R) -> Option<R> {
+    pub(crate) fn chem_edit<R>(&mut self, pos: [i32; 3], edit: impl FnOnce(&mut Compound) -> R) -> Option<R> {
         let key = (pos[0], pos[1], pos[2]);
         let Some(horizon_client::containers::BlockEntity::Mod(entity)) =
             self.world.block_entities.get_mut(&key)
@@ -149,7 +164,7 @@ impl Game<'_> {
     }
 
     fn chem_is_tube(&self, pos: [i32; 3]) -> bool {
-        self.chem_saved(pos).is_some_and(|(id, _)| id == TUBE)
+        self.chem_saved(pos).is_some_and(|(id, _)| is_tube(id))
     }
 
     fn chem_share(&self, pos: [i32; 3]) -> Option<Chem> {
@@ -198,8 +213,8 @@ impl Game<'_> {
             return false;
         };
         match id {
-            TUBE => true,
-            OXIDIZER | TANK => {
+            tube if is_tube(tube) => true,
+            block if block == OXIDIZER || is_tank(block) => {
                 side_value(nbt, CHEMICAL_CONFIG, relative_index(self.mek_facing(pos), side)) != 0
             }
             _ => false,
@@ -212,17 +227,21 @@ impl Game<'_> {
             return 0;
         };
         match block {
-            TUBE => {
-                let tubes = self.chem_network(pos);
+            tube if is_tube(tube) => {
+                // A tube whose network hasn't formed yet offers only its own capacity, as the recording
+                // of mixed tiers shows on its first tick.
+                let dimension = self.dim.id().to_owned();
+                let formed = FORMED.with_borrow(|formed| formed.get(&dimension).is_some_and(|level| level.contains(&pos)));
+                let tubes = if formed { self.chem_network(pos) } else { vec![pos] };
                 let shares: Vec<_> = tubes.iter().map(|at| self.chem_share(*at)).collect();
                 let held = chemical::network_total(&shares);
-                let capacity = tubes.len() as i64 * chemical::BASIC_TUBE_CAPACITY;
+                let capacity = self.chem_tube_capacities(&tubes).iter().sum::<i64>();
                 Tank::new(capacity, held).room(id)
             }
-            TANK => {
+            tank if is_tank(tank) => {
                 let index = relative_index(self.mek_facing(pos), side);
                 if side_value(nbt, CHEMICAL_CONFIG, index) == SIDE_INPUT {
-                    read_tank(nbt, chemical::BASIC_TANK_CAPACITY).room(id)
+                    read_tank(nbt, tank_capacity(tank)).room(id)
                 } else {
                     0
                 }
@@ -236,13 +255,14 @@ impl Game<'_> {
             return;
         }
         let tube = self.chem_is_tube(pos);
+        let capacity = self.chem_saved(pos).map_or(0, |(id, _)| tank_capacity(id));
         self.chem_edit(pos, |nbt| {
             if tube {
                 let mut share = Tank::new(i64::MAX, read_share(nbt));
                 share.insert(&chem.id, chem.amount);
                 write_share(nbt, share.held.as_ref());
             } else {
-                let mut tank = read_tank(nbt, chemical::BASIC_TANK_CAPACITY);
+                let mut tank = read_tank(nbt, capacity);
                 tank.insert(&chem.id, chem.amount);
                 write_tank(nbt, &tank);
             }
@@ -284,7 +304,7 @@ impl Game<'_> {
         let known = TUBES.with_borrow(|tubes| tubes.get(&dimension).cloned().unwrap_or_default());
         let live: Vec<[i32; 3]> = known.into_iter().filter(|at| self.chem_is_tube(*at)).collect();
         TUBES.with_borrow_mut(|tubes| {
-            tubes.insert(dimension, live.clone());
+            tubes.insert(dimension.clone(), live.clone());
         });
         let mut done: Vec<[i32; 3]> = Vec::new();
         for start in &live {
@@ -296,6 +316,13 @@ impl Game<'_> {
             let tubes: Vec<[i32; 3]> = live.iter().copied().filter(|at| joined.contains(at)).collect();
             self.chem_tick_network(&tubes);
         }
+        FORMED.with_borrow_mut(|formed| {
+            formed.insert(dimension, live);
+        });
+    }
+
+    fn chem_tube_capacities(&self, tubes: &[[i32; 3]]) -> Vec<i64> {
+        tubes.iter().map(|at| self.chem_saved(*at).map_or(0, |(id, _)| tube_capacity(id))).collect()
     }
 
     fn chem_tick_network(&mut self, tubes: &[[i32; 3]]) {
@@ -314,7 +341,8 @@ impl Game<'_> {
         }
         held.amount -= self.chem_send(&targets, &held.id.clone(), held.amount);
         let left = (held.amount > 0).then_some(&held);
-        for (tube, share) in tubes.iter().zip(chemical::save_shares(left, tubes.len())) {
+        let capacities = self.chem_tube_capacities(tubes);
+        for (tube, share) in tubes.iter().zip(chemical::save_shares_by(left, &capacities)) {
             self.chem_edit(*tube, |nbt| write_share(nbt, share.as_ref()));
         }
     }

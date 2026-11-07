@@ -11,6 +11,17 @@ fn mekmachine_container_accepts(
 ) {
     use crate::game::mek;
     const INPUT: usize = 0;
+    if mek::is_cube(&entity.id) {
+        // `EnergyInventorySlot`: only what it can charge or discharge.
+        let usable = match slot {
+            mek::CUBE_DISCHARGE => matches!(&*stack.item, mek::ENERGY_TABLET | "minecraft:redstone" | "minecraft:redstone_block"),
+            _ => &*stack.item == mek::ENERGY_TABLET,
+        };
+        if !usable {
+            *cancel = true;
+        }
+        return;
+    }
     if entity.id == mek::GENERATOR {
         // `FluidFuelInventorySlot`: only what burns. Its right side is the energy slot's.
         let right = face.is_some_and(|face| mek::relative_index(game.mek_facing(pos), face) == mek::RIGHT_INDEX);

@@ -35,6 +35,6 @@ python3 port/run_tests.py --list
 python3 port/run_tests.py --changed main --dry-run
 ```
 
-`python3 port/test_run_tests.py` tests the runner itself and needs no game.
+`port/prune_server_builds.py` runs after each build and leaves only the newest server build of `mekmachine` in the launcher's folder. `python3 port/test_run_tests.py` tests the runner and the prune and needs no game.
 
 Use `--all` before a merge. `python3 port/gen_transmitter_model.py upstream` regenerates `machine/engine/src/transmitter_model.rs` from Mekanism's OBJ models.

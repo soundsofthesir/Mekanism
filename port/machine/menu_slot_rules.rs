@@ -15,6 +15,13 @@ fn mekmachine_menu_slot_rules(
         "mekanism:energized_smelter",
         "mekanism:chemical_oxidizer",
     ];
+    if menu.starts_with("mekanism:") && menu.ends_with("_energy_cube") {
+        *may_place = match slot {
+            0 => matches!(&*stack.item, "mekanism:energy_tablet" | "minecraft:redstone" | "minecraft:redstone_block"),
+            _ => &*stack.item == "mekanism:energy_tablet",
+        };
+        return;
+    }
     if !MACHINES.contains(&menu) {
         return;
     }

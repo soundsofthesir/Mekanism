@@ -103,10 +103,15 @@ pub fn network_total(shares: &[Option<Chem>]) -> Option<Chem> {
 
 /// `updateSaveShares`: what each tube saves of what the network holds.
 pub fn save_shares(total: Option<&Chem>, tubes: usize) -> Vec<Option<Chem>> {
+    save_shares_by(total, &vec![BASIC_TUBE_CAPACITY; tubes])
+}
+
+/// `updateSaveShares` when tubes hold different amounts, as a network of mixed tiers does.
+pub fn save_shares_by(total: Option<&Chem>, capacities: &[i64]) -> Vec<Option<Chem>> {
     let Some(total) = total else {
-        return vec![None; tubes];
+        return vec![None; capacities.len()];
     };
-    split(total.amount, &vec![BASIC_TUBE_CAPACITY; tubes])
+    split(total.amount, capacities)
         .into_iter()
         .map(|amount| (amount > 0).then(|| Chem::new(&total.id, amount)))
         .collect()

@@ -14,14 +14,17 @@ OXIDIZER = "chemical_oxidizer"
 # Input, output, energy item, upgrade input, upgrade output. The output slots only give.
 MACHINE_MENU = {"slots": 5, "data_slots": 17, "results": [1, 4]}
 OXIDIZER_MENU = {"slots": 5, "data_slots": 17, "results": [1, 4]}
+# Discharge and charge. Same data slots as the machines, which share the screen's code.
+CUBE_MENU = {"slots": 2, "data_slots": 17}
 # The fuel slot. Lava, energy, temperature.
 GENERATOR_MENU = {"slots": 1, "data_slots": 3}
 
 
 CABLE_THICKNESS = 4
 # Blocks a cable joins: everything with energy that is ported so far.
+TIERS = ("basic", "advanced", "elite", "ultimate")
 CABLE_JOINS = (
-    "mekanism:basic_energy_cube",
+    *(f"mekanism:{tier}_energy_cube" for tier in TIERS),
     "mekanism:enrichment_chamber",
     "mekanism:crusher",
     "mekanism:energized_smelter",
@@ -29,7 +32,9 @@ CABLE_JOINS = (
 )
 CABLE_PARTICLE = "mekanism:block/models/multipart/basic_universal_cable"
 # Blocks a tube joins: everything with chemicals that is ported so far.
-TUBE_JOINS = ("mekanism:chemical_oxidizer", "mekanism:basic_chemical_tank")
+TUBE_JOINS = ("mekanism:chemical_oxidizer", *(f"mekanism:{tier}_chemical_tank" for tier in TIERS))
+# Blocks a pipe joins.
+PIPE_JOINS = tuple(f"mekanism:{tier}_fluid_tank" for tier in TIERS)
 SIDES = ("north", "south", "east", "west", "up", "down")
 
 
@@ -84,10 +89,11 @@ def add_cable_look(carry: Path, upstream: Path) -> None:
     """The machine mod draws the cable's OBJ model, so its block has no model of its own. The energy
     contents' texture is in a folder the game's atlas skips, so it goes where the atlas looks."""
     write(carry / "assets/mekanism/models/block/port_empty.json", {"textures": {"particle": CABLE_PARTICLE}, "elements": []})
-    write(
-        carry / "assets/mekanism/blockstates/basic_universal_cable.json",
-        {"variants": {"": {"model": "mekanism:block/port_empty"}}},
-    )
+    for tier in TIERS:
+        write(
+            carry / f"assets/mekanism/blockstates/{tier}_universal_cable.json",
+            {"variants": {"": {"model": "mekanism:block/port_empty"}}},
+        )
     source = upstream / "src/main/resources/assets/mekanism/textures/mek_liquid/energy.png"
     target = carry / "assets/mekanism/textures/block/port_energy.png"
     target.write_bytes(source.read_bytes())
@@ -101,11 +107,12 @@ def add_cable_look(carry: Path, upstream: Path) -> None:
 
 def add_cube_model(carry: Path) -> None:
     """The real cube's model type draws its sides by their config. This is its plain model."""
-    path = carry / "assets/mekanism/blockstates/basic_energy_cube.json"
-    variants = json.loads(path.read_text())["variants"]
-    plain = {name: entry["tier_model"] for name, entry in variants.items() if "tier_model" in entry}
-    if plain:
-        path.write_text(json.dumps({"variants": plain}))
+    for tier in TIERS:
+        path = carry / f"assets/mekanism/blockstates/{tier}_energy_cube.json"
+        variants = json.loads(path.read_text())["variants"]
+        plain = {name: entry["tier_model"] for name, entry in variants.items() if "tier_model" in entry}
+        if plain:
+            path.write_text(json.dumps({"variants": plain}))
 
 
 def main() -> int:
@@ -121,8 +128,12 @@ def main() -> int:
     (generators / "heat_generator.json").write_text(json.dumps(GENERATOR_MENU))
     (menus / f"{OXIDIZER}.json").write_text(json.dumps(OXIDIZER_MENU))
     (Path(sys.argv[1]) / f"data/mekanism/horizon/block/{OXIDIZER}.json").unlink(missing_ok=True)
-    add_pipe(Path(sys.argv[1]), "basic_universal_cable", CABLE_JOINS)
-    add_pipe(Path(sys.argv[1]), "basic_pressurized_tube", TUBE_JOINS)
+    for tier in TIERS:
+        (menus / f"{tier}_energy_cube.json").write_text(json.dumps(CUBE_MENU))
+        (Path(sys.argv[1]) / f"data/mekanism/horizon/block/{tier}_energy_cube.json").unlink(missing_ok=True)
+        add_pipe(Path(sys.argv[1]), f"{tier}_universal_cable", CABLE_JOINS)
+        add_pipe(Path(sys.argv[1]), f"{tier}_pressurized_tube", TUBE_JOINS)
+        add_pipe(Path(sys.argv[1]), f"{tier}_mechanical_pipe", PIPE_JOINS)
     add_cable_look(Path(sys.argv[1]), Path(sys.argv[3]))
     add_cube_model(Path(sys.argv[1]))
     print(f"{len(MACHINES) + 2} menu types added, cable, tube and cube models replaced")

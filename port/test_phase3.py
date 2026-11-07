@@ -64,6 +64,11 @@ def game_time(world) -> int:
     return int(re.search(r"game time is (\d+)", answer).group(1))
 
 
+# A frozen game takes one command a tick, so a high rate saves time, and a step still moves one tick.
+NORMAL_TICK_RATE = 20
+MAX_FPS = 260
+
+
 def step(world) -> None:
     before = game_time(world)
     world.command("tick step 1")
@@ -138,10 +143,14 @@ def scenario_run(world) -> None:
     world.start()
     world.command("forceload add 0 -16 64 16")
     world.command("tick freeze")
+    world.command(f"tick rate {world.FAST_TICK_RATE}")
+    if world.has_player:
+        world.ctl("options-set", "maxFps", MAX_FPS)
     begin_checks()
     failures = []
     for index, scenario in enumerate(SCENARIOS):
         failures += replay(world, scenario, index * 2)
+    world.command(f"tick rate {NORMAL_TICK_RATE}")
     world.command("tick unfreeze")
     world.stop()
     if failures:

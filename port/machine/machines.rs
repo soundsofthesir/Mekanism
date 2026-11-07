@@ -107,7 +107,7 @@ fn mekmachine_machines(
     game.mek_tick_upgrades(entity);
     // A machine ejects before its recipe runs, so a result leaves on a later tick.
     game.mek_eject_items(pos, entity, OUTPUT);
-    game.mek_fill_energy_slot(entity);
+    game.mek_fill_energy_slot(entity, crate::game::mek::ENERGY_SLOT, i64::MAX);
     let mut machine = Machine {
         input: stack(entity.items.get(INPUT)),
         output: stack(entity.items.get(OUTPUT)),

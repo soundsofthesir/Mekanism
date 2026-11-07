@@ -32,6 +32,10 @@ pub const OXIDIZER_PROGRESS: [f32; 4] = [64.0, 40.0, 48.0, 8.0];
 pub const OXIDIZER_GAUGE: [f32; 4] = [131.0, 13.0, 18.0, 60.0];
 pub const OXIDIZER_POWER_BAR: [f32; 4] = [115.0, 75.0, 54.0, 6.0];
 pub const OXIDIZER_TITLE_Y: f32 = 5.0;
+/// `TileEntityEnergyCube`'s discharge and charge slots, and `GuiEnergyCube`'s gauge: `GaugeOverlay.WIDE`
+/// with a pixel on each side.
+pub const CUBE_SLOTS: [[f32; 2]; 2] = [[17.0, 35.0], [143.0, 35.0]];
+pub const CUBE_GAUGE: [f32; 4] = [55.0, 18.0, 66.0, 50.0];
 pub const TITLE_Y: f32 = 6.0;
 
 /// `GuiTankGauge.getScaledLevel`: at least a pixel when anything is held.

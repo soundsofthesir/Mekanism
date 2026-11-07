@@ -41,6 +41,8 @@ fn mekmachine_screen_press(
         Press::CloseWindow => gui::set_open_kind(None),
         Press::ShowKind(kind) => gui::set_open_kind(Some(kind)),
         Press::Button(id) => game.mek_send_menu_button(id),
+        // A cube takes no upgrades, so its screen has no such tab.
+        Press::OpenUpgrades if screen.menu.is_some_and(crate::game::mek::is_cube) => return,
         Press::OpenUpgrades => gui::set_upgrades_open(true),
     }
     *canceled = true;
