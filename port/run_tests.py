@@ -11,15 +11,22 @@ the groups for the files that differ from GIT_REF (default HEAD), including unco
 changed file with no rule selects every group, so the choice errs towards running more. The full
 set stays `--all`, and a merge to main should use it.
 
-A game that dies before a group's first check is a "launch crash": the group runs once more, and the
-output records it. If the group then passes on the same build it counts as passed. A failure after
-the first check is never retried. The runner stops any game its groups leave running and removes
-their folders, and removes what earlier runs left in `port/.work`.
+A launch that fails, or a game that dies, before a group's first check is a "launch failure": the
+group runs once more, and the output records it. If the group then passes on the same build it
+counts as passed. A failure after the first check is never retried. The runner stops any game its
+groups leave running and removes their folders, and removes what earlier runs left in `port/.work`.
+
+Before removing a failed attempt's folder it copies the evidence to `port/.work/failures/`, which it
+never clears: the output, exit status, logs and any macOS crash report, up to `KEEP_BYTES` a failure
+and `KEEP_TOTAL_BYTES` in all, dropping the oldest failures first.
+
+The runner refuses to start if the exported engine isn't this source: see `source_hash.py`.
 """
 
 import argparse
 import fnmatch
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -28,7 +35,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from horizon_driver import CHECKS_BEGIN, LAUNCH_CRASH_EXIT, RUN_FOLDER, stop_processes_in
+import source_hash
+from horizon_driver import CHECKS_BEGIN, LAUNCH_FAILURE_EXIT, RUN_FOLDER, stop_processes_in
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -36,7 +44,13 @@ WORK = HERE / ".work"
 ENGINE = WORK / "machine-export/horizon-engine"
 RESULTS = WORK / "results.txt"
 SINGLE, DEDICATED = "single", "dedicated"
-PASS, FAIL, CRASH = "PASS", "FAIL", "LAUNCH CRASH"
+FAILURES = WORK / "failures"
+KEEP_BYTES = 20 * 1024 * 1024
+KEEP_TOTAL_BYTES = 100 * 1024 * 1024
+DISK_BLOCK = 4096
+# Thousands of copied files that say nothing about a failure.
+CARRIED_CONTENT = {"horizon-mods", ".horizon-cache"}
+PASS, FAIL, LAUNCH_FAILURE = "PASS", "FAIL", "LAUNCH FAILURE"
 
 
 # name: (script, modes, extra arguments)
@@ -72,6 +86,7 @@ GROUPS = {
 RULES = [
     ("port/run_tests.py", []),
     ("port/test_run_tests.py", []),
+    ("port/source_hash.py", []),
     ("port/build_and_test.sh", []),
     ("port/README.md", []),
     ("PLAN.md", []),
@@ -175,11 +190,11 @@ def expand(selection: list[str]) -> list[tuple[str, str]]:
 
 
 def classify(returncode: int, output: str) -> tuple[str, str]:
-    """A launch crash needs the test's own exit code and no sign that its checks began. A pass with
+    """A launch failure needs the test's own exit code and no sign that its checks began. A pass with
     no sign of them means a test that doesn't mark its first check, which is a failure."""
     began = CHECKS_BEGIN in output.splitlines()
-    if returncode == LAUNCH_CRASH_EXIT and not began:
-        return CRASH, ""
+    if returncode == LAUNCH_FAILURE_EXIT and not began:
+        return LAUNCH_FAILURE, ""
     if returncode == 0 and began:
         return PASS, ""
     if returncode == 0:
@@ -198,24 +213,86 @@ def run_once(name: str, mode: str, folder: Path) -> tuple[str, str, float]:
         env={**os.environ, RUN_FOLDER: str(folder)},
     )
     result, note = classify(done.returncode, done.stdout)
-    output = done.stdout.rstrip() + (f"\n{note}" if note else "")
+    output = done.stdout.rstrip() + (f"\n{note}" if note else "") + f"\nexit status {done.returncode}"
     return result, output, time.monotonic() - started
 
 
+def keep_evidence(label: str, result: str, output: str, folder: Path, into: Path = FAILURES) -> Path:
+    """Copies a failed attempt's output and folder where the runner doesn't clear them. Logs and text
+    go first and then the smallest files, up to the cap. `skipped.txt` lists what didn't fit."""
+    kept = into / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}"
+    kept.mkdir(parents=True, exist_ok=True)
+    (kept / "result.txt").write_text(f"{result}\n{output}\n")
+    reports = [Path(path) for path in re.findall(r"\S+\.ips\b", output)]
+    in_folder = [
+        path for path in folder.rglob("*")
+        if path.is_file() and not path.is_symlink() and not CARRIED_CONTENT & set(path.parts)
+    ] if folder.is_dir() else []
+    text = (".log", ".txt", ".json", ".toml", ".ips", ".properties")
+    room = KEEP_BYTES
+    skipped = []
+    for path in sorted([*reports, *in_folder], key=lambda p: (p.suffix not in text, _size(p))):
+        size = _size(path)
+        if not path.is_file() or size > room:
+            skipped.append(f"{size} {path}")
+            continue
+        target = kept / (path.relative_to(folder) if path.is_relative_to(folder) else path.name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(path, target)
+        room -= size
+    (kept / "skipped.txt").write_text("".join(f"{line}\n" for line in skipped))
+    _trim(into)
+    return kept
+
+
+def _size(path: Path) -> int:
+    """Bytes on disk, near enough: a small file still takes a block."""
+    try:
+        return path.stat().st_size + DISK_BLOCK
+    except OSError:
+        return 0
+
+
+def _trim(into: Path) -> None:
+    """Drops the oldest kept failures until the total fits."""
+    folders = sorted(path for path in into.iterdir() if path.is_dir())
+    sizes = {path: sum(_size(file) for file in path.rglob("*")) for path in folders}
+    total = sum(sizes.values())
+    for path in folders[:-1]:
+        if total <= KEEP_TOTAL_BYTES:
+            break
+        shutil.rmtree(path, ignore_errors=True)
+        total -= sizes[path]
+
+
+def attempt(name: str, mode: str, number: int, folder: Path, out) -> tuple[str, str, float]:
+    """Runs a group in its own folder. If it doesn't pass, keeps the evidence and frees the folder."""
+    # Short: the game's control socket lives under this, and macOS limits a socket's path to 104 bytes.
+    own = folder / f"a{sum(1 for _ in folder.iterdir())}"
+    own.mkdir(parents=True, exist_ok=True)
+    result, output, seconds = run_once(name, mode, own)
+    if result != PASS:
+        stop_processes_in(own)
+        kept = keep_evidence(f"{name}-{mode}-{number}", result, output, own)
+        output = f"{output}\nevidence kept in {kept}"
+    shutil.rmtree(own, ignore_errors=True)
+    return result, output, seconds
+
+
 def run_group(name: str, mode: str, folder: Path, out) -> tuple[bool, bool]:
-    """Returns whether the group passed and whether a launch crash happened."""
-    result, output, seconds = run_once(name, mode, folder)
-    crashed = result == CRASH
-    if crashed:
-        report(f"== {name}, {mode}: {CRASH} in {seconds:.0f} s, running it once more", out)
+    """Returns whether the group passed and whether a launch failure happened."""
+    result, output, seconds = attempt(name, mode, 1, folder, out)
+    failed_launch = result == LAUNCH_FAILURE
+    if failed_launch:
+        report(f"== {name}, {mode}: {LAUNCH_FAILURE} in {seconds:.0f} s, running it once more", out)
         report(output, out)
-        result, output, seconds = run_once(name, mode, folder)
-        if result == CRASH:
-            result = f"{CRASH} TWICE"
-    after = ", after a launch crash" if crashed else ""
+        result, output, seconds = attempt(name, mode, 2, folder, out)
+        if result == LAUNCH_FAILURE:
+            result = f"{LAUNCH_FAILURE} TWICE"
+    after = ", after a launch failure" if failed_launch else ""
     report(f"== {name}, {mode}: {result} in {seconds:.0f} s{after}", out)
     report(output, out)
-    return result == PASS, crashed
+    return result == PASS, failed_launch
 
 
 def sweep(folders: list[Path]) -> None:
@@ -262,21 +339,25 @@ def main() -> int:
     if args.dry_run:
         print(" ".join(f"{name}:{mode}" for name, mode in runs))
         return 0
+    problem = source_hash.problem_with()
+    if problem:
+        print(f"REFUSED: {problem}. Run `sh port/build_and_test.sh --trust-native-code --eula` without --no-build.", file=sys.stderr)
+        return 2
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
     sweep(leftovers())
     folder = Path(tempfile.mkdtemp(prefix="run-", dir=WORK))
     failed = 0
-    crashes = []
+    failed_launches = []
     try:
         with RESULTS.open("w") as out:
             started = time.monotonic()
             for name, mode in runs:
-                passed, crashed = run_group(name, mode, folder, out)
+                passed, failed_launch = run_group(name, mode, folder, out)
                 failed += not passed
-                if crashed:
-                    crashes.append(f"{name}:{mode}")
+                if failed_launch:
+                    failed_launches.append(f"{name}:{mode}")
             report(f"{len(runs) - failed} of {len(runs)} passed in {time.monotonic() - started:.0f} s", out)
-            report(f"launch crashes: {', '.join(crashes) or 'none'}", out)
+            report(f"launch failures: {', '.join(failed_launches) or 'none'}", out)
     finally:
         sweep([folder])
     return 1 if failed else 0

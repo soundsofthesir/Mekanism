@@ -174,7 +174,6 @@ Every item of the batch of 2026-11-07 below is done. In order, what's left of th
 
 Rules for a fresh worker:
 
-- After a break is reverted, `native-build` can say "Up to date" and export the broken engine, because it compares against the last good fingerprint and the binary in `native/target` is the broken one. Change a comment in `machine/` before the next real run. `build.txt`'s first line shows which case it was. This cost 2 runs here.
 - `/give` has no parser for a mod's item component, though a chest's data and `item replace ... from block` keep it. `test_upgrades.py` uses that.
 - A test that interacts just after a `setblock` must wait first: the client gets the block a little later, and `interact` answers "no face ... is visible".
 - `horizon_driver` writes no `options.txt`. A test that reads the top right of a screen writes `tutorialStep:none`, or the tutorial's toast covers it.
@@ -274,7 +273,40 @@ So it is not shown to be the mod's fault, and no change was made for it. `run_te
 
 `horizon_driver.run_test` wraps every test. A test calls `begin_checks` just before its first check. If the game has died by then, the test exits with code 75 and `run_tests.py` reports `LAUNCH CRASH`, runs the group once more and records that in the output and the last line. A second crash fails the group. Anything after `begin_checks`, or a failure with the game still alive, is a plain failure and never retried. A group that passes without calling `begin_checks` fails, so a test can't skip the mark.
 
-The runner gives each run a `port/.work/run-...` folder for the tests' folders. It stops anything left in them and removes them when it ends, including on SIGTERM, and clears any `tmp...` and `run-...` left by earlier runs when it starts. A process is identified by its arguments, or by its working directory or an open file in the folder, because macOS hides most processes' environments from `ps`. `port/test_run_tests.py` tests all of this with stand-ins and no game. A real launch was checked with an engine that exits at once (exit 75), and SIGTERM to the runner during a chain run left no process or folder. A real segfault hasn't gone through this path, since none recurred. On a dedicated server the supervisor may restart a crashed engine, which would then show as a plain failure rather than a launch crash; that is unverified.
+The runner gives each run a `port/.work/run-...` folder for the tests' folders. It stops anything left in them and removes them when it ends, including on SIGTERM, and clears any `tmp...` and `run-...` left by earlier runs when it starts. A process is identified by its arguments, or by its working directory or an open file in the folder, because macOS hides most processes' environments from `ps`. `port/test_run_tests.py` tests all of this with stand-ins and no game. A real launch was checked with an engine that exits at once (exit 75), and SIGTERM to the runner during a chain run left no process or folder. (The batch of 2026-11-07's later work renamed this outcome "launch failure". See "Stale engine guard and failure evidence".) A real segfault hasn't gone through this path, since none recurred. On a dedicated server the supervisor may restart a crashed engine, which would then show as a plain failure rather than a launch crash; that is unverified.
+
+### Stale engine guard and failure evidence
+
+The stale engine is real and now explained. `native-build` said "Incremental rebuild" and exported the previous binary. This sequence with a marker string in each crate showed it, on the launcher's own commands:
+
+| Step | Build's first line | Markers in the exported engine | Time |
+|---|---|---|---|
+| 1 A | Incremental | A | 60 s |
+| 2 B, A's build kept | Incremental | B | 44 s |
+| 3 back to A, kept | Up to date | A | 8 s |
+| 4 B, after a prune | Up to date | B | 7 s |
+| 5 back to A, pruned | Incremental | **B** | 17 s |
+
+The launcher keeps each source's patched copy under a key from the mod's files (`inject_cache`). Going back to a source it has seen copies that snapshot into the stage, with its old modified times, as far as the behaviour shows. I read `sync` and `inject_cache` but did not inspect a stage file's time. Cargo then sees files older than its last compile and compiles nothing, though the new version folder is recorded as A. Step 8 of the same run showed the engine crate has the same problem when a file comes back with an old time, as `cp -p` does. A build still in `server-builds` is "Up to date", which exports that folder and was correct in steps 3 and 4.
+
+`port/source_hash.py` handles it. A file `engine/src/build_stamp.rs`, not in git, holds a hash of port/machine's files and a nonce, and `networks.rs` keeps the hash in the game with `black_box`. It survives into the binary, which step 1 above tested. The hash is taken over every file in the folder, so a new file not yet in git counts too. A new nonce means a key the launcher hasn't seen, so freshly patched source and a recompile of the engine crate and then the game crate that depends on it. The nonce changes for any source other than the last one built. `build_and_test.sh` then reads the hash from the engine's bytes. If it isn't there, the script writes a new nonce and builds again, and it stops if the hash is still missing. Only then does it write `machine-export/source-hash`. `run_tests.py` refuses to start unless the record and the engine's own bytes both name the current source, with or without `--no-build`.
+
+Proven by real builds, with `upgrades` or `tiers` run in the game:
+
+- Break in a game file (`mek.rs` uninstall removes 2): `--no-build` gave `REFUSED: the engine was built from source dac95ea333bf, but port/machine is now 62b7d0a84f9b`. A build and run failed with `one uninstalled: got 2, expected 3`. After `git checkout`, `--no-build` was refused the other way round, and a build and run passed in 73 s.
+- Break in the engine crate (cable capacity 8,000 to 12,345): `tiers` failed at `tier_cable_mixed` tick 1. After restoring the file with `cp -p`, so that its old time came back, the build and `tiers` passed.
+- Forced rebuild: the stale case put back by hand, with A's old stamp and "last built" record after a build of B. The first build exported B: `The exported engine doesn't hold source hash dac95ea333bf...`, then `Forcing a real rebuild with a new stamp`, then `upgrades` passed.
+
+Could an earlier result have run a stale engine? Yes, and it can't be ruled out from what's left, because the exported engines were overwritten and no hash was recorded. A stale engine needed a return to a source the launcher had already built, in practice the revert after a break. So:
+
+- Every first build of new work was real, because new content has a new key.
+- A plain `--all` result is safe in one direction. A stale engine holds a reverted break, each reported break was shown to fail a group in `--all`, and those runs didn't fail on that break. The 2 stale runs PLAN.md mentioned before were noticed this way.
+- A `--changed` or named-group run after a revert could have passed on an engine still holding a break outside those groups. Nothing recorded lets me say whether one did.
+- The `--all` on the guarded engine below is the first result tied to its source.
+
+Failure evidence. `run_tests.py` gives each attempt a short folder of its own and, if it doesn't pass, copies the evidence to `port/.work/failures/<time>-<group>-<mode>-<attempt>/` before removing the folder. The copy has `result.txt` (the result, output and exit status), `c.log`, the game's logs and any macOS report the output names, with logs and text first, up to 20 MB a failure and 100 MB in all. It leaves out the carried content, and `skipped.txt` names anything else left out. The runner never clears that folder, only drops the oldest past the cap. `launching` in `horizon_driver.py` reports any failure of the commands that start a game as a `LaunchFailure`, with exit status, stdout and stderr, so a launch that fails before the first check is a launch failure and gets one retry whether or not a crash report exists. After the first check, as in a restart, it stays a plain failure. It did its job at once: my first per-attempt folder name made the socket path too long, the game exited with `path must be shorter than SUN_LEN`, and the kept `c.log` said so.
+
+`port/test_run_tests.py` checks these with stand-ins and no game. Breaks that failed it: the `LaunchFailure` case removed from `run_test`, launch failure classified as plain failure, the refusal removed, the size cap removed, the check of the engine's bytes removed, and a stamp of another source kept. The original segfault and empty-message launch failures have not recurred, so their causes are still unknown.
 
 ### Chain speed
 
