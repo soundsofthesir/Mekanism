@@ -164,7 +164,7 @@ Group times, each mode, before the change below: chain 1,025 s, chemical 325 s, 
 
 ### Next steps
 
-Everything in the batch of 2026-11-07 below is done. In order, what's left of the transport and machine layer:
+Every item of the batch of 2026-11-07 below is done. In order, what's left of the transport and machine layer:
 
 1. Connection modes and redstone on transmitters, and pulling from a block: tube and pipe `pull` rates (`TubeTier`, `PipeTier`) are copied nowhere yet. `CableTier` has none.
 2. Chemical item slots and the oxidizer's drain slot, once a chemical item is ported. Real Fluid Tank and Chemical Tank items and screens.
@@ -197,7 +197,9 @@ Tiers. `machine/engine/src/tiers.rs` holds `CableTier`, `TubeTier`, `ChemicalTan
 
 Mechanical Pipe. `port/machine/pipe.rs` follows `chem.rs`, and the Fluid Tank came with it because a pipe needs a source. A tank emits only downwards and only while `active_state` is set. `port/java_reference_pipe.py` records 16 scenarios, and `port/test_pipe.py` replays them in both modes. One thing looked strange until the code explained it: a tank above a basic pipe loses 1,000 a tick, not 2,000, because the pipe's network splits what it holds between both tanks and half goes back up.
 
-Test speed. `machines` and `chemical` now use the chain's fast tick rate, with no row removed.
+Test speed. `machines` and `chemical` now use the chain's fast tick rate, with no row removed: `machines` 27 s and 26 s against 268 s and 266 s, `chemical` 41 s and 45 s against 325 s and 323 s. Changing one progress value at row 60 of `chamber_normal.tsv` and `oxidizer_normal.tsv` fails each group in both modes at tick 60. Other breaks: pipe capacity 2,000 to 1,500 and tank rate 4,000 to 3,000 fail `pipe`; a network offering its full capacity on its first tick fails `tiers`; cube rate 16,000 to 15,000 fails `tiers` at `tier_cube_advanced` tick 1, and cable capacity, tube capacity and tank rate each fail `tiers`. The failing row of those last ones wasn't captured.
+
+Full run on this work, `--all` after a rebuild: 22 of 23 runs passed in 886 s (15 minutes, against 29). `upgrades` failed in 9 s, in `horizon-ctl launch`, before its first check, with an empty message and no new macOS crash report, and its folder was cleared before it could be read. It then passed 3 of 3 runs on the same build. The cause is unknown. The runner reports this as a plain failure rather than a launch crash, because the game wasn't known to have died. Group times: chain 74 s and 92 s, generator 83 s, features 70 s and 40 s, furnace 49 s and 39 s, chemical 41 s and 45 s, menu 40 s, oxidizer screen 37 s, cube screen 36 s, cable look 30 s, machines 27 s and 26 s, tiers 28 s and 20 s, GUI 26 s, pipe 22 s and 17 s, transfer 17 s and 15 s. `upgrades` takes 71 s when it runs.
 
 Known differences this batch leaves:
 
@@ -212,7 +214,17 @@ Known differences this batch leaves:
 
 Cost per item, counted by hand from the transcript. Rust lines are additions in `port/machine`.
 
-COSTS_TABLE
+| Item | Turns | Elapsed | Rust lines |
+|---|---|---|---|
+| 0 Disk | 2 | About 2 min | 0 (32 lines of Python) |
+| 1 Ejecting | 5 | 14 min | 120 |
+| 2 Player controls, with 3's encoding | About 25 | 52 min | 627 |
+| 4 Energy slots | 3 | 14 min | 111 |
+| 5 Tiers and cube screen, with 3's game test | About 9 | Not split | 352 |
+| 6 Mechanical Pipe and Fluid Tank | About 7 | Not split | 296 |
+| 7 Test speed | 2 | Not split | 0 |
+
+Items 5, 6 and 7 together took 45 minutes. Turns are approximate, and elapsed times come from commit times, so they include unattended test runs. About 8 of item 2's turns went on finding Horizon's APIs, and 2 on the launcher's stale engine.
 
 Item 5 is 6 tiered kinds in the model's terms, plus one screen. Once the first tier ran, adding the others was data, so the tier work itself was near the model's 2 to 4 turns a unit. The cube's screen and the first-tick finding took the rest.
 
