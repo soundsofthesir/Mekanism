@@ -281,7 +281,7 @@ The runner gives each run a `port/.work/run-...` folder for the tests' folders. 
 
 `machine/engine/src/process_table.rs` holds one row per machine: block, recipe type, usage, tank, random use, what the extra slot does and the screen's positions. `advanced.rs` (engine and helper), `gui_process`, `port/java_reference_process.py`, `port/test_process.py` and `port/test_process_screen.py` all work from it or from their own row, so a machine of this shape costs a row in each. `port/gen_chemical_table.py` writes `chemical_table.rs` with each chemical's name, tint and sprite, and `add_machine_content.py` copies the icons to `port_*` block textures.
 
-Recordings: 46 scenarios, replayed in both modes with every field compared. Combiner 9, Sawmill 8, Purification 10, Injection 7, Infuser 13. Facts they showed: the infuser takes its chemical when a recipe ends and resets, rather than pauses, with too little. The tank takes a conversion only for a chemical some recipe has with the item in the input slot. Conversion comes before the recipe in a tick. The sawmill refuses to run without room for its largest chance output, even if the roll would give none.
+Recordings: 46 scenarios, replayed in both modes with every field compared. Combiner 9, Sawmill 8, Purification 10, Injection 6, Infuser 13. Facts they showed: the infuser takes its chemical when a recipe ends and resets, rather than pauses, with too little. The tank takes a conversion only for a chemical some recipe has with the item in the input slot. Conversion comes before the recipe in a tick. The sawmill refuses to run without room for its largest chance output, even if the roll would give none.
 
 Random use, per machine:
 
