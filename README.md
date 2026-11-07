@@ -70,6 +70,10 @@ The scripts named `port/java_reference_*.py` record the real mod. They need a Ne
 - `PLAN.md` is the plan, with each phase's results.
 - `LICENSE` is the MIT licence, with both copyright notices.
 
+## Credits
+
+The port's code, tests and documentation were written by [Claude](https://github.com/claude), Anthropic's AI model, under soundsofthesir's direction. Commits credit Claude with a `Co-Authored-By` trailer.
+
 ## Licence
 
 The port is released under the MIT licence. See `LICENSE`. The port's own code is copyright 2026 soundsofthesir. Code and content carried over from Mekanism keep Mekanism's copyright notice, which `LICENSE` also includes.
