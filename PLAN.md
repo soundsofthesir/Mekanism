@@ -100,7 +100,7 @@ Two carry steps are needed. `port/add_common_tags.py` adds NeoForge's `c:` tags,
 
 Known differences from the real mod:
 
-- Machines: no upgrades, redstone control, sounds, particles or radiation. Items aren't ejected on their own (`eject3` is ignored). Energy item slots are hidden. A menu's input slot takes any item, because Horizon's slot rule has no recipe table at hand, though a hopper is held to recipes.
+- Machines: no sounds, particles or radiation. Items aren't ejected on their own (`eject3` is ignored; see Phase 4's next steps). Energy item slots are hidden. A menu's input slot takes any item, because Horizon's slot rule has no recipe table at hand, though a hopper is held to recipes.
 - Sides: a hopper putting items in follows the saved sides, but one taking items out doesn't, so a hopper below can always pull the output. A bare `setblock` gets the item's default sides here and none in the real mod.
 - Blocks: the three machines and the generator copy a furnace, so they have an unused `lit` state and face only the four compass directions. Their hardness, tools, sounds and shapes are unchecked against Java, as are the other carried blocks'.
 - Energy Cube: basic tier only, with no menu and no charge or discharge slots, so a player can't change its sides. Its transfer limit is per call, not per tick. Its model doesn't show side settings. Its energy doesn't stay in the item when broken (unverified against Java).
@@ -149,9 +149,9 @@ Known differences from the real mod:
 - Chemicals: basic tube and basic tank only. Only the oxidizer holds chemicals as a machine. No gas dumping, radiation, chemical item slots or `canEject` rules beyond the sides. A tube has no connection modes or redstone control.
 - Tube shares: the real mod's network order comes from a hash, so which tube gets a remainder isn't copied. `test_chemical` compares shares sorted within each row. Two real runs gave the same order, so it may be stable there, but its source says identity hash.
 - Tubes with different chemicals don't join, which matches `isValidTransmitter`, but no recording covers it or the merge when two networks meet.
-- Oxidizer: a plain screen with only the input slot, no chemical gauge, side config or energy slot. Its `active` state isn't shown on the block, whose carried model has none.
+- Oxidizer: its `active` state isn't shown on the block, whose carried model has none. See its screen below for the rest.
 - Chemical Tank: no screen, slots or dump mode. Its carried block is a carved pumpkin template with its real model name, and its real tank model's custom drawing isn't done.
-- Machine screen: there is no recording of the real screen, because that needs a Java client. Positions and art come from source. Tabs for upgrades, security, redstone, experience and transporter config are drawn but do nothing. The energy tab has no tooltip, and tooltips cover only side buttons, the power bar and the side tab. No warnings, recipe viewer, block icons on side buttons or window dragging and pinning. Item ejecting can be toggled but still does nothing. A press makes no click sound, since the hook is read only. Text is hard-coded English from `en_us.json` for the window. The energy slot is drawn but isn't in the menu.
+- Machine screen: there is no recording of the real screen, because that needs a Java client. Positions and art come from source. Tabs for upgrades, security, redstone, experience and transporter config are drawn but do nothing, so a player can't install upgrades or change redstone control yet: only saved data does. Tooltips cover side buttons, the power bar, the side tab, the energy tab and the gauge. No warnings, recipe viewer, block icons on side buttons or window dragging and pinning. Item ejecting can be toggled but still does nothing. A press makes no click sound, since the hook is read only. Text is hard-coded English from `en_us.json` for the window. The energy slot is drawn but isn't in the menu.
 - The Heat Generator's screen is still the plain one, and the Energy Cube has none.
 - Universal Cable: base tier, normal and none connections only, with no glass or pull and push parts. Connections come from a tag list, not from checking that the neighbour's side takes energy. Contents show this cable's share, not the network's scale with its fade of 0.02 a tick. Alpha below 100% and the look on a dedicated server's client are unverified. The Pressurized Tube still uses the plain model.
 - `port/machine` adds `mek_send_menu_button` and `vertices_mut` use, both outside the named catalog.
@@ -161,6 +161,47 @@ Not tested: a client on a dedicated server, and frame time with many cables.
 Full run on the slice, `--all` after a clean build: 13 of 14 runs passed in 58 minutes. The 14th, `menu`, stopped when the game crashed while opening its world, before any of the test's checks. It then passed 3 of 3 runs on the same build. The crash is a null `Arc` clone in the `lan_host` closure while it maps `StateFacts`, under `ChunkEncoder::with_signs` (macOS report at 22:20). The cause is unknown. Nothing in `port/machine` names `lan_host` or `ChunkEncoder`, but that doesn't clear the mod, because its blocks are in that state table. It happened once in an estimated 40 launches and may recur in any group. A crash before a test's first check isn't a test failure, but it must be recorded here.
 
 Group times, each mode, before the change below: chain 1,025 s, chemical 325 s, machines 265 s, generator 83 s, furnace 55 s and 39 s, menu 40 s, cable look 33 s, GUI 24 s, transfer 17 s and 14 s.
+
+### Next steps
+
+Item ejecting is not done. `port/reference/eject_*.tsv` already holds the recordings and `java_reference_features.py` makes them. What they and `TileComponentEjector` show:
+
+- The ejector ticks before the recipe, and after each attempt it waits `tickDelay = 10`, so attempts come every 11 ticks from the first tick (ticks 1, 12, ... 210, ... 408). A running chamber's result made at tick 201 leaves at tick 210.
+- An attempt moves a whole slot in one tick: 70 dust left at tick 1 into a chest, in one attempt.
+- `eject_off` and `eject_closed_side` move nothing.
+- What's needed: a way to put items in a neighbour. Look at how Horizon's hopper inserts, and add `test_features` rows that compare the chest column, which it currently skips. Remove "Items aren't ejected" from Phase 3's differences only when `eject_*` match.
+
+After that, the shared features still missing from a player's reach: the upgrade tab and slot, and the redstone tab's button. `machines`, `chemical` and `generator` groups could take the chain's fast tick rate, since they also step while frozen, and would save several minutes a run.
+
+### Upgrades and redstone control
+
+`machine/engine/src/upgrades.rs` holds `UpgradeUtils`' arithmetic and `port/test_features.py` replays 15 recordings of it (530 rows), in single player and on a dedicated server, with all fields matching. From the recordings:
+
+- Usage is `ceil(base * 10^(2*speed/8 - energy/8))` and ticks are `max(1, trunc(base * 10^(-speed/8)))`.
+- Capacity is `usage * max(4, ticks)` once anything is installed, and `usage * 4` with nothing installed. So a chamber goes from 20 to 400 with 4 energy upgrades, and a higher count gives less: 8 energy upgrades give 200. Horizon's energy buffer is per block type, so `mek_energy_room` applies this per block.
+- `control_type: "high"` runs only with a signal and `"low"` only without. A stopped machine keeps its progress and clears `active_state`. `"pulse"` behaves as `"disabled"` on these machines.
+
+Proven able to fail by building each break: speed share over 4 instead of 8 fails `upgrade_idle_speed4` at tick 1; energy share ignored fails `upgrade_idle_energy4` at tick 1; capacity with a multiplier of only 4 fails `upgrade_idle_speed4` at tick 1; `high` and `low` swapped fails `redstone_high` at tick 2. The engine's own tests also hold the recorded values.
+
+Known differences: only speed and energy upgrades, with no installing by a player and no chemical or other upgrades. Capacity shown in a menu is cut to 16 bits by the menu's data slots, which holds for these numbers (a chamber's largest recorded capacity is 10,000) but not for an energy amount loaded above 32,767. `operationsPerTick` isn't ported, and no recording needs it, since a chamber's fastest recipe takes 20 ticks.
+
+### Oxidizer screen
+
+`gui_oxidizer` in `machine/gui.rs` draws `GuiChemicalOxidizer` on a screen shared with the electric machines: the chemical gauge with its overlay and tinted gas, the horizontal power bar, the large progress arrow, input, drain and energy slots, the tabs, three side config kinds (items, chemicals, energy) and tooltips. `port/test_oxidizer_screen.py` checks it with the same screenshot and click method as the Enrichment Chamber: the art at each position, the gauge's level at 2,500 and 7,500 mB, the bar's length, tab order, chemical side buttons and the eject toggle.
+
+Tooltips' words are tested in the engine, including the compact energy text (`5 FE/20 FE`, `1.5 kFE`). In the game, the test only sees that a tooltip of the right size appears, because it can't read text in a screenshot.
+
+Proven able to fail by building each break: `OXIDIZER_GAUGE` x 131 to 132 (frame corner, 3 pixels); gas tint bytes swapped (15 rows wrong); gauge level rounded down (1 row wrong); energy tab before chemicals (tab icon, 83 pixels); gauge tooltip removed (no tooltip, 0 pixels); drain slot art `slot/extra` to `slot/output` (68 pixels); power bar level doubled (bar runs past its end); chemical side cycle output to input (top side got 1). One break, the power bar's width 2 pixels more, passed, because at this energy level both widths round to the same 10 pixels, so it was replaced by the doubled level.
+
+A menu type declares its data slots in `data/mekanism/horizon/menu/*.json`, and anything beyond that count is silently dropped, which cost several turns here. It is now 10 for the machines. Values go as 16 bits.
+
+Known differences: the gauge draws frame 0 of the animated gas texture. Only sulfur dioxide has its tint, and other oxidizer products draw untinted though their names are right. The drain and energy slots are drawn but aren't in the menu. No warnings on the gauge, bar or arrow, and no recipe viewer.
+
+Cost of this item, for re-estimating the other screens: about 34 turns and 16 minutes to a first full pass (00:07 to 00:23), plus 15 minutes of unattended builds for the 8 break runs. The commit adds 374 lines of Rust and removes 94, of which 152 added are in `gui.rs` and 152 in `gui_layout.rs` (with its tests), plus a 296-line test. Turns were counted by hand from the transcript, so treat them as approximate. Roughly a third of the turns went on reading Mekanism's source and about 8 on the data slot limit, so a next screen with the same elements should cost less, though that is untested. A screen with a new element type, such as a scroll list or text field, is unmeasured.
+
+### Full run
+
+`--all` on this work: 17 of 17 runs passed in 1,738 s (29 minutes, against 58 before), with no launch crash. Group times: chemical 325 s and 323 s, machines 268 s and 266 s, chain 74 s and 92 s, generator 82 s, furnace 51 s and 40 s, menu 41 s, oxidizer screen 37 s, features 33 s and 21 s, cable look 28 s, GUI 25 s, transfer 17 s and 15 s.
 
 ### The launch crash
 
