@@ -60,10 +60,17 @@ pub(crate) const DIRECTIONS: [Direction; 6] = [
     Direction::East,
 ];
 
+/// `TileEntityOsmiumCompressor`, with `osmiumCompressor`'s usage from `UsageConfig`.
+pub(crate) const COMPRESSOR: &str = "mekanism:osmium_compressor";
+pub(crate) const COMPRESSOR_USAGE: i64 = 15;
+/// Its secondary slot follows the slots it shares with the other machines.
+pub(crate) const ADVANCED_SECONDARY: usize = 5;
+pub(crate) const ADVANCED_SLOTS: usize = 6;
+
 pub(crate) fn has_block_entity(block: &str) -> bool {
     matches!(
         block,
-        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter"
+        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" | COMPRESSOR
     ) || is_cube(block)
         || is_cable(block)
         || block == GENERATOR
@@ -85,7 +92,7 @@ pub(crate) fn default_config(block: &str) -> Compound {
     }
     let (energy, items): ([i32; 6], [i32; 6]) = match block {
         cube if is_cube(cube) => (CUBE_ENERGY_SIDES, CUBE_ITEM_SIDES),
-        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" => {
+        "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" | COMPRESSOR => {
             ([SIDE_INPUT; 6], MACHINE_ITEM_SIDES)
         }
         _ => return Compound::new(),
@@ -519,7 +526,7 @@ impl Game<'_> {
     pub(crate) fn mek_is_machine(block: &str) -> bool {
         matches!(
             block,
-            "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter"
+            "mekanism:enrichment_chamber" | "mekanism:crusher" | "mekanism:energized_smelter" | COMPRESSOR
         )
     }
 
@@ -538,6 +545,12 @@ impl Game<'_> {
 
     /// `TileEntityRecipeMachine.containsRecipe`.
     pub(crate) fn mek_has_recipe(&self, block: &str, stack: &horizon_client::items::ItemStack) -> bool {
+        if block == COMPRESSOR {
+            return self.native_recipes_of_type("mekanism:compressing").iter().any(|recipe| {
+                self.native_recipe_ingredient(&recipe.json["item_input"]["ingredient"])
+                    .is_some_and(|ingredient| ingredient.test(stack))
+            });
+        }
         let kind = match block {
             "mekanism:enrichment_chamber" => "mekanism:enriching",
             "mekanism:crusher" => "mekanism:crushing",
@@ -627,6 +640,7 @@ impl Game<'_> {
         match id {
             "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => Some((5, 200)),
             "mekanism:crusher" => Some((8, 200)),
+            COMPRESSOR => Some((COMPRESSOR_USAGE, mekmachine_engine::advanced::BASE_TICKS)),
             super::chem::OXIDIZER => {
                 use mekmachine_engine::chemical::{OXIDIZER_TICKS, OXIDIZER_USAGE};
                 Some((OXIDIZER_USAGE, OXIDIZER_TICKS))
@@ -895,9 +909,32 @@ impl Game<'_> {
             .unwrap_or(0)
     }
 
+    /// What one item of `stack` converts to, by `mekanism:chemical_conversion`, if the Osmium
+    /// Compressor's tank takes it: only a chemical some compressing recipe uses (`containsRecipeB`).
+    pub(crate) fn mek_chemical_from(&self, stack: &horizon_client::items::ItemStack) -> Option<(String, i64)> {
+        self.native_recipes_of_type("mekanism:chemical_conversion").iter().find_map(|recipe| {
+            let ingredient = self.native_recipe_ingredient(&recipe.json["input"]["ingredient"])?;
+            if !ingredient.test(stack) {
+                return None;
+            }
+            let id = recipe.json["output"]["id"].as_str()?;
+            let used = self.native_recipes_of_type("mekanism:compressing").iter().any(|compressing| {
+                self.native_recipe_chemical_matches(&compressing.json["chemical_input"]["ingredient"], id)
+            });
+            used.then(|| Some((id.to_owned(), recipe.json["output"]["amount"].as_i64()?))).flatten()
+        })
+    }
+
+    /// `ChemicalIngredient`: a chemical's id, or `#` and a tag this port doesn't read yet.
+    pub(crate) fn native_recipe_chemical_matches(&self, ingredient: &serde_json::Value, id: &str) -> bool {
+        ingredient.as_str().is_some_and(|wanted| wanted == id)
+    }
+
     /// `TileComponentUpgrade.tickServer`.
     pub(crate) fn mek_tick_upgrades(&mut self, entity: &mut horizon_client::containers::ModBlockEntity) {
-        entity.items.resize(MACHINE_SLOTS, None);
+        if entity.items.len() < MACHINE_SLOTS {
+            entity.items.resize(MACHINE_SLOTS, None);
+        }
         // The real mod never saves an empty `component_upgrade`. A command can still give one.
         if matches!(entity.nbt.get(&JavaString::from("component_upgrade")), Some(Tag::Compound(held)) if held.is_empty()) {
             entity.nbt.remove(&JavaString::from("component_upgrade"));

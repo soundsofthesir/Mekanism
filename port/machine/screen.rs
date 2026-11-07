@@ -40,6 +40,25 @@ fn mekmachine_screen(block: &str, screen: &mut Option<horizon_client::mod_api::N
         });
         return;
     }
+    if block == crate::game::mek::COMPRESSOR {
+        *screen = Some(horizon_client::mod_api::NativeScreen {
+            width: layout::SCREEN_WIDTH,
+            height: layout::SCREEN_HEIGHT,
+            slots: vec![
+                Some(layout::COMPRESSOR_INPUT),
+                Some(layout::COMPRESSOR_OUTPUT),
+                Some(layout::COMPRESSOR_ENERGY),
+                Some(layout::OFF_SCREEN),
+                Some(layout::OFF_SCREEN),
+                Some(layout::COMPRESSOR_SECONDARY),
+            ],
+            inventory_y: layout::INVENTORY[1],
+            inventory_x: layout::INVENTORY[0],
+            own_labels: true,
+            own_background: true,
+        });
+        return;
+    }
     if !crate::game::Game::mek_is_machine(block) {
         return;
     }

@@ -40,6 +40,17 @@ fn mekmachine_container_accepts(
         }
         return;
     }
+    if entity.id == mek::COMPRESSOR && slot == mek::ADVANCED_SECONDARY {
+        // `ChemicalInventorySlot.fillOrConvert`: by a side set to input, and only what converts.
+        let side_is_input = face.is_none_or(|face| {
+            let index = mek::relative_index(game.mek_facing(pos), face);
+            mek::side_value(&entity.nbt, mek::ITEM_CONFIG, index) == mek::SIDE_INPUT
+        });
+        if !side_is_input || game.mek_chemical_from(stack).is_none() {
+            *cancel = true;
+        }
+        return;
+    }
     if slot == mek::ENERGY_SLOT {
         // By a side set to energy, and only what `menu_slot_rules` lets a player place.
         let side_is_energy = face.is_none_or(|face| {

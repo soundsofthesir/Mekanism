@@ -81,6 +81,10 @@ GROUPS = {
     "chemical": ("test_chemical.py", (SINGLE, DEDICATED), []),
     "features": ("test_features.py", (SINGLE, DEDICATED), []),
     "reload": ("test_reload.py", (SINGLE, DEDICATED), []),
+    "advanced": ("test_advanced.py", (SINGLE, DEDICATED), []),
+    "compressor_screen": ("test_compressor_screen.py", (SINGLE,), [
+        "--art", str(ROOT / "upstream/src/main/resources/assets/mekanism/textures/gui/sprites"),
+    ]),
 }
 
 # The first matching rule wins. Paths are relative to the project.
@@ -91,6 +95,12 @@ RULES = [
     ("port/build_and_test.sh", []),
     ("port/README.md", []),
     ("PLAN.md", []),
+    ("port/java_reference_advanced.py", ["advanced"]),
+    ("port/test_advanced.py", ["advanced"]),
+    ("port/test_compressor_screen.py", ["compressor_screen"]),
+    ("port/reference/compressor_*", ["advanced"]),
+    ("port/machine/advanced.rs", ["advanced"]),
+    ("port/machine/engine/src/advanced.rs", ["advanced"]),
     ("port/java_reference_reload.py", ["reload"]),
     ("port/test_reload.py", ["reload"]),
     ("port/reference/reload_*", ["reload"]),

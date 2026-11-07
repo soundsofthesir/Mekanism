@@ -164,16 +164,18 @@ Group times, each mode, before the change below: chain 1,025 s, chemical 325 s, 
 
 ### Next steps
 
-Every item of the batch of 2026-11-07 below is done. In order, what's left of the transport and machine layer:
+The batch of 2026-11-07's stale engine guard, reload work and failure evidence are done, and so is the Osmium Compressor. In order, what's left:
 
-1. Connection modes and redstone on transmitters, and pulling from a block: tube and pipe `pull` rates (`TubeTier`, `PipeTier`) are copied nowhere yet. `CableTier` has none.
-2. Chemical item slots and the oxidizer's drain slot, once a chemical item is ported. Real Fluid Tank and Chemical Tank items and screens.
-3. Creative tiers of the cube and tanks: no capacity fits `i32`, so they need a `Long` in the block's data and three data slots, and their own rule for never draining.
-4. The heat generator's real screen and the transporter and security tabs, which are drawn but inert.
-5. The next machines. A machine like the oxidizer shares `Machine<Output>`, `fill_menu`, the upgrade window and the side window, so each should cost mostly its recording and screen.
+1. The recipe machines, each with its real screen, one recording of normal running and one edge case at least, compared in both modes. Next: Combiner, Precision Sawmill, Purification Chamber, Chemical Injection Chamber, Metallurgic Infuser. Then Chemical Infuser, Chemical Washer, Chemical Crystallizer, Chemical Dissolution Chamber, Rotary Condensentrator, Electrolytic Separator, Pressurized Reaction Chamber. See "Osmium Compressor" for what a machine with a tank needs. A recipe's item and chemical inputs are in `item_input` and `chemical_input`. Purification and Injection set `useStatisticalMechanics`, so their chemical use is random (`StatUtils.inversePoisson`) and rows can only be compared within a bound. Sawmill recipes have a chance output, which is random too. Chemical inputs named by a `#` tag need tag reading: `native_recipe_chemical_matches` and `advanced.rs` read only a chemical's id. Block names are repeated in many `match` arms in `mek.rs`, `container.rs`, `energy.rs`, `blocks.rs`, `screen.rs` and `gui.rs`, and a table would make each machine cheaper.
+2. Connection modes and redstone on transmitters, and pulling from a block: tube and pipe `pull` rates (`TubeTier`, `PipeTier`) are copied nowhere yet. `CableTier` has none.
+3. Chemical item slots and the oxidizer's drain slot, once a chemical item is ported. Real Fluid Tank and Chemical Tank items and screens.
+4. Creative tiers of the cube and tanks: no capacity fits `i32`, so they need a `Long` in the block's data and three data slots, and their own rule for never draining.
+5. The heat generator's real screen and the transporter and security tabs, which are drawn but inert.
 
 Rules for a fresh worker:
 
+- `port/.work/check/carry` holds the carried content, and `add_machine_content.py` must run again after a machine is added to it, or the game has no menu for the machine. `cargo` isn't on the path: use the launcher's, in `~/Library/Application Support/horizon-launcher/rust/*/bin`.
+- A `data` command on a machine rebuilds its block entity and clears `data`, including the recalculated mark. Empty a slot by `item replace`.
 - `/give` has no parser for a mod's item component, though a chest's data and `item replace ... from block` keep it. `test_upgrades.py` uses that.
 - A test that interacts just after a `setblock` must wait first: the client gets the block a little later, and `interact` answers "no face ... is visible".
 - `horizon_driver` writes no `options.txt`. A test that reads the top right of a screen writes `tutorialStep:none`, or the tutorial's toast covers it.
@@ -274,6 +276,25 @@ So it is not shown to be the mod's fault, and no change was made for it. `run_te
 `horizon_driver.run_test` wraps every test. A test calls `begin_checks` just before its first check. If the game has died by then, the test exits with code 75 and `run_tests.py` reports `LAUNCH CRASH`, runs the group once more and records that in the output and the last line. A second crash fails the group. Anything after `begin_checks`, or a failure with the game still alive, is a plain failure and never retried. A group that passes without calling `begin_checks` fails, so a test can't skip the mark.
 
 The runner gives each run a `port/.work/run-...` folder for the tests' folders. It stops anything left in them and removes them when it ends, including on SIGTERM, and clears any `tmp...` and `run-...` left by earlier runs when it starts. A process is identified by its arguments, or by its working directory or an open file in the folder, because macOS hides most processes' environments from `ps`. `port/test_run_tests.py` tests all of this with stand-ins and no game. A real launch was checked with an engine that exits at once (exit 75), and SIGTERM to the runner during a chain run left no process or folder. (The batch of 2026-11-07's later work renamed this outcome "launch failure". See "Stale engine guard and failure evidence".) A real segfault hasn't gone through this path, since none recurred. On a dedicated server the supervisor may restart a crashed engine, which would then show as a plain failure rather than a launch crash; that is unverified.
+
+### Osmium Compressor
+
+`port/java_reference_advanced.py` records 14 scenarios of `TileEntityOsmiumCompressor` and `port/test_advanced.py` replays them in both modes with every field compared. `machine/engine/src/advanced.rs` and `machine/advanced.rs` hold the machine, and `port/test_compressor_screen.py` checks its screen in the way the oxidizer's is checked: art at the source's positions, progress, chemical bar, power bar, tooltips, the secondary slot by clicks and the side window.
+
+From the recordings:
+
+- 200 ticks, 15 FE and 1 mB a tick, so a tank of 210 runs a dust and 10 ticks more. An empty tank pauses with progress kept. A wrong chemical or no recipe resets.
+- With 4 speed upgrades a recipe takes 63 ticks and uses 200 mB by `constantUse`: 3 a tick, rising to 4 near the end. A tank with less than a tick's use pauses, so 1 mB left stays there.
+- An ingot gives its 200 mB only when all of it fits (`compressor_ingot_exact_fit`), before the recipe runs in the same tick.
+- A placed compressor with no energy upgrades holds 60 FE.
+
+Breaks that failed: usage 15 to 14 (`compressor_normal` tick 1); `constantUse` rounding up (`compressor_speed4` tick 1); a conversion ignoring room (`compressor_ingot` tick 2); running on a tank with less than a tick's use (`compressor_speed4` tick 67). Tank capacity 210 to 200 passed at first, because every recording set the tank by command. I added `compressor_ingot_exact_fit`, which fails it at tick 2. Screen breaks that failed: osmium tint's bytes swapped (`chemical bar at 150`, 9 rows); secondary slot a pixel off (2 pixels); energy slot a pixel off (50 pixels); secondary slot taking anything (`dirt refused`). The engine's own 2 tests hold the recorded normal and speed runs.
+
+Known differences: one recipe type, `mekanism:compressing`, with all of its recipes `per_tick_usage`. The tank takes chemical only from a conversion recipe, not from a tube, since no recording covers one and `TUBE_JOINS` leaves it out, and no chemical item works in its slot. Its side window has items, chemicals and energy, but the item kinds have no extra side, so a hopper reaches the secondary slot by an input side. `menu_slot_rules` allows only an osmium ingot and block in the secondary slot, where the real mod reads tags. Removing a dust and then adding one back resets `used_so_far` here, which I neither read in the source nor recorded, so it may differ. Its screen shows no warnings or recipe viewer, like the others.
+
+Recipes: the carried data here holds 1,675 recipes of Mekanism's own types, counting both mods, not the 1,718 this plan quoted before, and I can't say where that figure came from. 491 now do something: crushing 255, enriching 205, oxidizing 25, compressing 2, energy conversion 2, and the 2 osmium chemical conversions. The other 22 chemical conversions are unused so far. Types that still do nothing: painting 288, pigment extracting 275, sawing 157, injecting 109, combining 106, mek data 38, metallurgic infusing 31, purifying 28, dissolution 23, nucleosynthesizing 23, rotary 20, pigment mixing 16, reaction 14, crystallizing 10, washing 7, chemical infusing 5, separating 3, activating 2, centrifuging 2, evaporating 2, bin extract 1, bin insert 1, clear configuration 1.
+
+Cost: 22 tool rounds counted from the transcript, from the first read of its source to writing this, without the 7 rounds of the chunk unload work that interrupted it. About 12 of them were reading and writing the shape of a machine with a tank for the first time, before the first build. It's above the model's 8 to 15 turns for a medium unit, and a machine that reuses this one should cost less, but that isn't measured because no second one was added. Rust added: 139 lines in `machine/advanced.rs`, 168 in the engine's `advanced.rs` with its tests, and about 165 across the existing files. Python: 126 for the recorder, 119 for the replay and 203 for the screen test.
 
 ### Saved machines through a reload
 

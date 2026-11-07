@@ -43,6 +43,7 @@ fn mekmachine_energy(block: &str, energy: &mut Option<horizon_client::containers
         }
         "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => *energy = Some(machine(5)),
         "mekanism:crusher" => *energy = Some(machine(8)),
+        crate::game::mek::COMPRESSOR => *energy = Some(machine(crate::game::mek::COMPRESSOR_USAGE as i32)),
         crate::game::chem::OXIDIZER => {
             *energy = Some(machine(mekmachine_engine::chemical::OXIDIZER_USAGE as i32));
         }

@@ -1,0 +1,10 @@
+tick	progress	active	energy	input	secondary	output	chemical	tank
+0	0	0	100000	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx3	-	mekanism:osmium	11
+1	1	1	99985	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx3	-	mekanism:osmium	10
+2	2	1	99970	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx2	-	mekanism:osmium	209
+3	3	1	99955	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx2	-	mekanism:osmium	208
+4	4	1	99940	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx2	-	mekanism:osmium	207
+5	5	1	99925	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx2	-	mekanism:osmium	206
+6	6	1	99910	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx2	-	mekanism:osmium	205
+7	7	1	99895	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx2	-	mekanism:osmium	204
+8	8	1	99880	minecraft:glowstone_dustx8	mekanism:ingot_osmiumx2	-	mekanism:osmium	203
