@@ -296,6 +296,8 @@ Recipes: the carried data here holds 1,675 recipes of Mekanism's own types, coun
 
 Cost: 22 tool rounds counted from the transcript, from the first read of its source to writing this, without the 7 rounds of the chunk unload work that interrupted it. About 12 of them were reading and writing the shape of a machine with a tank for the first time, before the first build. It's above the model's 8 to 15 turns for a medium unit, and a machine that reuses this one should cost less, but that isn't measured because no second one was added. Rust added: 139 lines in `machine/advanced.rs`, 168 in the engine's `advanced.rs` with its tests, and about 165 across the existing files. Python: 126 for the recorder, 119 for the replay and 203 for the screen test.
 
+Full run on this work, `--all` after the guard's build: 28 of 28 runs passed in 1,105 s, with no launch failure. `port/.work/machine-export/source-hash` and the engine's bytes named this source. New groups: `reload` 29 s and 22 s, `advanced` 52 s and 29 s, `compressor_screen` 37 s.
+
 ### Saved machines through a reload
 
 This plan used to say the real mod always writes `component_upgrade`, so a fresh machine reloads holding 1,000 where the port stayed at 20. That was wrong, and came from reading `serialize` without a recording. `port/java_reference_reload.py` records 8 scenarios through a real server restart and 3 through a real chunk unload, and `port/test_reload.py` replays them in both modes, every field of every row:
