@@ -172,7 +172,7 @@ def check_bars(screen: Screen, art: Path, progress: int, energy: int) -> None:
     expect("power bar's lit rows", lit, math.ceil(energy / ENERGY_CAPACITY * (POWER_INSIDE - 1)) + 1)
 
 
-def check_window(world, screen_origin, scale: int, art: Path, x: int, z: int, folder: Path) -> None:
+def check_window(world, screen_origin, scale: int, art: Path, x: int, z: int, folder: Path, input_at: tuple[int, int] = INPUT_SLOT_AT) -> None:
     ox, oy = screen_origin
     wx, wy = ox + WINDOW_AT[0], oy + WINDOW_AT[1]
     click(world, ox + SIDE_TAB_BUTTON_AT[0] + TAB_MIDDLE, oy + SIDE_TAB_BUTTON_AT[1] + TAB_MIDDLE)
@@ -212,7 +212,7 @@ def check_window(world, screen_origin, scale: int, art: Path, x: int, z: int, fo
     expect("energy top after the energy tab and a click", sides(text(world, f"data get block {x} {Y} {z}"), ENERGY_CONFIG)[TOP], 0)
     click(world, wx + CLOSE_AT[0] + 4, wy + CLOSE_AT[1] + 4)
     closed = shot(world, folder / "closed.png", screen_origin, scale)
-    frame = closed.matches_art(Image(art / "slot/input.png"), (INPUT_SLOT_AT[0] - 1, INPUT_SLOT_AT[1] - 1), (0, 0, 18, 1))
+    frame = closed.matches_art(Image(art / "slot/input.png"), (input_at[0] - 1, input_at[1] - 1), (0, 0, 18, 1))
     expect("input slot back after closing", frame, 0)
 
 

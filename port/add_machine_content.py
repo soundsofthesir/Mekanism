@@ -14,8 +14,17 @@ OXIDIZER = "chemical_oxidizer"
 # Input, output, energy item, upgrade input, upgrade output. The output slots only give.
 MACHINE_MENU = {"slots": 5, "data_slots": 17, "results": [1, 4]}
 COMPRESSOR = "osmium_compressor"
-# As the machines, then the secondary slot.
+# As the machines, then the slot after the upgrades. These are `process_table.rs`'s machines.
 COMPRESSOR_MENU = {"slots": 6, "data_slots": 17, "results": [1, 4]}
+PROCESS_MACHINES = {
+    COMPRESSOR: COMPRESSOR_MENU,
+    "purification_chamber": COMPRESSOR_MENU,
+    "chemical_injection_chamber": COMPRESSOR_MENU,
+    "combiner": COMPRESSOR_MENU,
+    "metallurgic_infuser": COMPRESSOR_MENU,
+    # Its slot after the upgrades is a second output.
+    "precision_sawmill": {"slots": 6, "data_slots": 17, "results": [1, 4, 5]},
+}
 OXIDIZER_MENU = {"slots": 5, "data_slots": 17, "results": [1, 4]}
 # Discharge and charge. Same data slots as the machines, which share the screen's code.
 CUBE_MENU = {"slots": 2, "data_slots": 17}
@@ -31,7 +40,7 @@ CABLE_JOINS = (
     "mekanism:enrichment_chamber",
     "mekanism:crusher",
     "mekanism:energized_smelter",
-    "mekanism:osmium_compressor",
+    *(f"mekanism:{machine}" for machine in PROCESS_MACHINES),
     "mekanismgenerators:heat_generator",
 )
 CABLE_PARTICLE = "mekanism:block/models/multipart/basic_universal_cable"
@@ -119,6 +128,40 @@ def add_cube_model(carry: Path) -> None:
             path.write_text(json.dumps({"variants": plain}))
 
 
+def add_chemical_tags(carry: Path, generators: Path) -> None:
+    """Horizon has no chemical tag registry, so each tag file also goes in as a recipe a hook can read."""
+    out = carry / "data/mekanism/recipe/port_chemical_tag"
+    out.mkdir(parents=True, exist_ok=True)
+    tags: dict[str, list[str]] = {}
+    for root in (carry, generators):
+        for path in sorted((root / "data/mekanism/tags/mekanism/chemical").rglob("*.json")):
+            name = path.relative_to(root / "data/mekanism/tags/mekanism/chemical").with_suffix("").as_posix()
+            tags.setdefault(f"mekanism:{name}", []).extend(json.loads(path.read_text())["values"])
+
+    def expand(values: list[str]) -> list[str]:
+        out_values: list[str] = []
+        for value in values:
+            out_values.extend(expand(tags[value[1:]]) if value.startswith("#") else [value])
+        return out_values
+
+    for tag, values in tags.items():
+        file = out / f"{tag.split(':')[1].replace('/', '_')}.json"
+        file.write_text(json.dumps({"type": "mekmachine:chemical_tag", "tag": tag, "values": expand(values)}))
+
+
+def add_chemical_art(carry: Path, upstream: Path) -> None:
+    """The GUI atlas holds block textures, so chemical icons go there under `port_`, as `gen_chemical_table.py` names them."""
+    art = upstream / "src/main/resources/assets/mekanism/textures"
+    out = carry / "assets/mekanism/textures/block"
+    for folder in ("mek_liquid", "mek_chemical/slurry", "mek_chemical/infuse_type"):
+        for path in sorted((art / folder).glob("*.png")):
+            name = "port_" + path.relative_to(art).with_suffix("").as_posix().replace("/", "_")
+            (out / f"{name}.png").write_bytes(path.read_bytes())
+            meta = path.with_suffix(".png.mcmeta")
+            if meta.exists():
+                (out / f"{name}.png.mcmeta").write_bytes(meta.read_bytes())
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print(__doc__, file=sys.stderr)
@@ -131,7 +174,11 @@ def main() -> int:
     generators.mkdir(parents=True, exist_ok=True)
     (generators / "heat_generator.json").write_text(json.dumps(GENERATOR_MENU))
     (menus / f"{OXIDIZER}.json").write_text(json.dumps(OXIDIZER_MENU))
-    (menus / f"{COMPRESSOR}.json").write_text(json.dumps(COMPRESSOR_MENU))
+    for machine, menu in PROCESS_MACHINES.items():
+        (menus / f"{machine}.json").write_text(json.dumps(menu))
+        (Path(sys.argv[1]) / f"data/mekanism/horizon/block/{machine}.json").unlink(missing_ok=True)
+    add_chemical_tags(Path(sys.argv[1]), Path(sys.argv[2]))
+    add_chemical_art(Path(sys.argv[1]), Path(sys.argv[3]))
     (Path(sys.argv[1]) / f"data/mekanism/horizon/block/{OXIDIZER}.json").unlink(missing_ok=True)
     for tier in TIERS:
         (menus / f"{tier}_energy_cube.json").write_text(json.dumps(CUBE_MENU))

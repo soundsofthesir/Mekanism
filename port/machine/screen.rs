@@ -40,17 +40,17 @@ fn mekmachine_screen(block: &str, screen: &mut Option<horizon_client::mod_api::N
         });
         return;
     }
-    if block == crate::game::mek::COMPRESSOR {
+    if let Some(def) = mekmachine_engine::process_table::process(block) {
         *screen = Some(horizon_client::mod_api::NativeScreen {
             width: layout::SCREEN_WIDTH,
             height: layout::SCREEN_HEIGHT,
             slots: vec![
-                Some(layout::COMPRESSOR_INPUT),
-                Some(layout::COMPRESSOR_OUTPUT),
-                Some(layout::COMPRESSOR_ENERGY),
+                Some(def.screen.input),
+                Some(def.screen.output),
+                Some(def.screen.energy),
                 Some(layout::OFF_SCREEN),
                 Some(layout::OFF_SCREEN),
-                Some(layout::COMPRESSOR_SECONDARY),
+                Some(def.screen.extra),
             ],
             inventory_y: layout::INVENTORY[1],
             inventory_x: layout::INVENTORY[0],

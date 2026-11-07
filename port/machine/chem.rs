@@ -40,6 +40,11 @@ pub(crate) const OXIDIZED: [(&str, &str); 9] = [
 /// `TransmissionType.CHEMICAL`'s index.
 pub(crate) const CHEMICAL_CONFIG: &str = "config2";
 /// The oxidizer menu's data slots for what its tank holds, and its chemical sides.
+/// A chemical's place in `CHEMICALS` plus one, as a menu's data slot holds it, or 0.
+pub(crate) fn chemical_kind(id: &str) -> i32 {
+    mekmachine_engine::chemical_table::CHEMICALS.iter().position(|(each, ..)| *each == id).map_or(0, |at| at as i32 + 1)
+}
+
 pub(crate) const DATA_CHEMICAL: usize = 7;
 pub(crate) const DATA_CHEMICAL_KIND: usize = 8;
 pub(crate) const DATA_CHEMICAL_SIDES: usize = 9;

@@ -31,8 +31,8 @@ fn mekmachine_screen_draw(
         game.gui_cube(batch, data, origin);
     } else if block == crate::game::chem::OXIDIZER {
         game.gui_oxidizer(batch, data, origin);
-    } else if block == crate::game::mek::COMPRESSOR {
-        game.gui_compressor(batch, data, origin);
+    } else if let Some(def) = mekmachine_engine::process_table::process(block) {
+        game.gui_process(batch, data, origin, def);
     } else if crate::game::Game::mek_is_machine(block) {
         game.gui_machine(batch, data, origin);
     }

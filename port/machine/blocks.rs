@@ -6,9 +6,11 @@ fn mekmachine_blocks(blocks: &mut Vec<horizon_mods::content::Block>) {
         ..Default::default()
     });
     // Mekanism's own blocks. The content mod `mekanism` holds their models and textures.
-    for name in ["enrichment_chamber", "crusher", "energized_smelter", "osmium_compressor"] {
+    let shared = mekmachine_engine::process_table::PROCESS.iter().map(|def| def.block.to_owned());
+    let chambers = ["enrichment_chamber", "crusher", "energized_smelter"].map(|name| format!("mekanism:{name}"));
+    for id in chambers.into_iter().chain(shared) {
         blocks.push(horizon_mods::content::Block {
-            id: format!("mekanism:{name}"),
+            id,
             // A furnace's template opens a menu and faces like one. Its `lit` goes unused.
             template: "minecraft:furnace".into(),
             state_properties: [("active".to_owned(), horizon_mods::content::StateProperty::Boolean)]

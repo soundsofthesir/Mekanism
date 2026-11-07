@@ -138,14 +138,6 @@ pub const ENERGY_KIND: usize = 1;
 pub const CHEMICAL_KIND: usize = 2;
 /// `AttributeSideConfig`: a window's kinds, in tab order.
 pub const ELECTRIC_KINDS: &[usize] = &[ITEM_KIND, ENERGY_KIND];
-/// `GuiAdvancedElectricMachine`, from `TileEntityAdvancedElectricMachine`'s slots. The port's menu has
-/// the slots in the order input, output, energy, two for upgrades, secondary.
-pub const COMPRESSOR_INPUT: [f32; 2] = [64.0, 17.0];
-pub const COMPRESSOR_OUTPUT: [f32; 2] = [116.0, 35.0];
-pub const COMPRESSOR_ENERGY: [f32; 2] = [39.0, 35.0];
-pub const COMPRESSOR_SECONDARY: [f32; 2] = [64.0, 53.0];
-/// `new GuiChemicalBar(this, ..., 68, 36, 6, 12, false)`, whose frame adds a pixel each way.
-pub const COMPRESSOR_BAR: [f32; 4] = [68.0, 36.0, 8.0, 14.0];
 pub const OXIDIZER_KINDS: &[usize] = &[ITEM_KIND, CHEMICAL_KIND, ENERGY_KIND];
 const KIND_COUNT: i32 = 3;
 

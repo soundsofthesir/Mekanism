@@ -1,4 +1,4 @@
-// The Osmium Compressor's tick, through `mekmachine_engine::advanced`.
+// The tick of the machines in `process_table.rs`, through `mekmachine_engine::advanced`.
 fn mekmachine_advanced(
     game: &mut crate::game::Game<'_>,
     pos: [i32; 3],
@@ -7,41 +7,88 @@ fn mekmachine_advanced(
     use crate::game::{chem, mek};
     use horizon_client::items::ItemStack;
     use horizon_world::nbt::{JavaString, Tag};
-    use mekmachine_engine::advanced::{self, AdvancedMachine, ChemicalRecipe, ChemicalRecipes};
+    use mekmachine_engine::advanced::{self, AdvancedMachine, Need, ProcessRecipe, ProcessRecipes, Rolls};
+    use mekmachine_engine::chemical::Tank;
     use mekmachine_engine::furnace::Stack;
+    use mekmachine_engine::process_table::{self as table, Extra, ProcessDef};
+    use std::{cell::RefCell, collections::HashMap};
 
-    if entity.id != mek::COMPRESSOR {
+    let Some(def) = table::process(&entity.id) else {
         return;
-    }
+    };
     const INPUT: usize = 0;
     const OUTPUT: usize = 1;
-    const KIND: &str = "mekanism:compressing";
 
-    struct Compressing<'a, 'g> {
-        game: &'a crate::game::Game<'g>,
+    thread_local! {
+        /// Each machine kind's recipes by input item, since an ingredient is slow to parse every tick.
+        /// A change in the number of recipes clears it.
+        static BY_ITEM: RefCell<HashMap<(&'static str, String), (usize, Vec<usize>)>> = RefCell::new(HashMap::new());
     }
-    impl ChemicalRecipes for Compressing<'_, '_> {
-        fn find(&self, input: &Stack, chemical: Option<&str>) -> Option<ChemicalRecipe> {
-            let stack = ItemStack::new(&input.item, input.count);
-            self.game.native_recipes_of_type(KIND).iter().find_map(|recipe| {
-                let wanted = &recipe.json["item_input"];
-                if !self.game.native_recipe_ingredient(&wanted["ingredient"])?.test(&stack) {
-                    return None;
+
+    struct Lookup<'a, 'g> {
+        game: &'a crate::game::Game<'g>,
+        def: &'static ProcessDef,
+    }
+    impl Lookup<'_, '_> {
+        fn parse(&self, recipe: &horizon_client::mod_api::CustomRecipe, extra: Option<&Stack>, chemical: Option<&str>) -> Option<ProcessRecipe> {
+            let json = &recipe.json;
+            let (wanted, need) = match self.def.recipes {
+                "mekanism:combining" => {
+                    let second = &json["extra_input"];
+                    let extra = extra?;
+                    let held = ItemStack::new(&extra.item, extra.count);
+                    if !self.game.native_recipe_ingredient(&second["ingredient"])?.test(&held) {
+                        return None;
+                    }
+                    (&json["main_input"], Need::Item(second["count"].as_u64().unwrap_or(1) as u32))
                 }
-                let gas = &recipe.json["chemical_input"];
-                let id = gas["ingredient"].as_str()?;
-                if chemical.is_some_and(|held| held != id) {
-                    return None;
+                "mekanism:sawing" => (&json["input"], Need::Nothing),
+                _ => {
+                    let gas = &json["chemical_input"];
+                    let ingredient = &gas["ingredient"];
+                    if chemical.is_some_and(|held| !self.game.native_recipe_chemical_matches(ingredient, held)) {
+                        return None;
+                    }
+                    let amount = gas["amount"].as_i64().unwrap_or(1);
+                    let per_tick = json["per_tick_usage"].as_bool().unwrap_or(false);
+                    (&json["item_input"], if per_tick { Need::PerTick(amount) } else { Need::AtEnd(amount) })
                 }
-                let output = self.game.native_recipe_result(&recipe.json["output"])?;
-                Some(ChemicalRecipe {
-                    id: recipe.id.clone(),
-                    input_count: wanted["count"].as_u64().unwrap_or(1) as u32,
-                    chemical: id.to_owned(),
-                    amount: gas["amount"].as_i64().unwrap_or(1),
-                    output: Stack::new(&output.item, output.count as u32),
-                })
+            };
+            let made = if self.def.recipes == "mekanism:sawing" { &json["main_output"] } else { &json["output"] };
+            let output = (!made.is_null()).then(|| self.game.native_recipe_result(made)).flatten();
+            let byproduct = self.game.native_recipe_result(&json["secondary_output"]).map(|out| {
+                (Stack::new(&out.item, out.count as u32), json["secondary_chance"].as_f64().unwrap_or(0.0))
+            });
+            Some(ProcessRecipe {
+                id: recipe.id.clone(),
+                input_count: wanted["count"].as_u64().unwrap_or(1) as u32,
+                need,
+                output: output.map(|out| Stack::new(&out.item, out.count as u32)),
+                byproduct,
             })
+        }
+    }
+    impl ProcessRecipes for Lookup<'_, '_> {
+        fn find(&self, input: &Stack, extra: Option<&Stack>, chemical: Option<&str>) -> Option<ProcessRecipe> {
+            let recipes = self.game.native_recipes_of_type(self.def.recipes);
+            let key = (self.def.block, input.item.clone());
+            let known = BY_ITEM.with_borrow(|cache| cache.get(&key).filter(|(count, _)| *count == recipes.len()).map(|(_, list)| list.clone()));
+            let matching = known.unwrap_or_else(|| {
+                let stack = ItemStack::new(&input.item, 1);
+                let list: Vec<usize> = recipes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, recipe)| {
+                        self.game
+                            .native_recipe_ingredient(&recipe.json[mek::process_input_key(self.def.recipes)]["ingredient"])
+                            .is_some_and(|ingredient| ingredient.test(&stack))
+                    })
+                    .map(|(index, _)| index)
+                    .collect();
+                BY_ITEM.with_borrow_mut(|cache| cache.insert(key, (recipes.len(), list.clone())));
+                list
+            });
+            matching.into_iter().find_map(|index| self.parse(&recipes[index], extra, chemical))
         }
         fn max_stack(&self, item: &str) -> u32 {
             let items = match &self.game.world_tables {
@@ -66,14 +113,19 @@ fn mekmachine_advanced(
     if entity.items.len() < mek::ADVANCED_SLOTS {
         entity.items.resize(mek::ADVANCED_SLOTS, None);
     }
+    game.mek_register_extra_items(def);
     game.mek_tick_upgrades(entity);
     game.mek_eject_items(pos, entity, OUTPUT);
+    if def.extra == Extra::ByProduct {
+        game.mek_eject_items(pos, entity, mek::ADVANCED_SECONDARY);
+    }
     game.mek_fill_energy_slot(entity, mek::ENERGY_SLOT, i64::MAX);
 
-    let mut tank = chem::read_tank(&entity.nbt, advanced::TANK_CAPACITY);
+    let mut tank = if def.tank > 0 { chem::read_tank(&entity.nbt, def.tank) } else { Tank::new(0, None) };
     // `ChemicalInventorySlot.fillTankOrConvert`: one item, only if all of its chemical fits.
-    if let Some(item) = entity.items[mek::ADVANCED_SECONDARY].clone()
-        && let Some((id, amount)) = game.mek_chemical_from(&item)
+    if def.extra == Extra::Conversion
+        && let Some(item) = entity.items[mek::ADVANCED_SECONDARY].clone()
+        && let Some((id, amount)) = game.mek_chemical_from(&item, def, entity.items[INPUT].as_ref())
         && tank.room(&id) >= amount
     {
         tank.insert(&id, amount);
@@ -87,10 +139,11 @@ fn mekmachine_advanced(
     };
     let upgrades = mek::upgrades_of(&entity.nbt);
     let ticks = upgrades.ticks(advanced::BASE_TICKS);
-    let energy_per_tick = upgrades.energy_per_tick(mek::COMPRESSOR_USAGE);
+    let energy_per_tick = upgrades.energy_per_tick(def.usage);
     let was_active = int("active_state") != 0;
     let mut machine = AdvancedMachine {
         input: stack(entity.items.get(INPUT)),
+        extra: if def.extra == Extra::Conversion { None } else { stack(entity.items.get(mek::ADVANCED_SECONDARY)) },
         output: stack(entity.items.get(OUTPUT)),
         tank,
         energy: i64::from(int("energy")),
@@ -103,7 +156,8 @@ fn mekmachine_advanced(
         },
     };
     if game.mek_may_run(pos, &entity.nbt) {
-        machine.tick(&Compressing { game: &*game }, energy_per_tick, advanced::BASE_TICKS, ticks);
+        let rolls = mek::process_rolls(entity, def, advanced::chemical_mean(upgrades.speed));
+        machine.tick(&Lookup { game: &*game, def }, rolls, energy_per_tick, advanced::BASE_TICKS, ticks);
     } else {
         machine.active = false;
     }
@@ -111,8 +165,13 @@ fn mekmachine_advanced(
     let fields = &mut **entity;
     store(&mut fields.items[INPUT], &machine.input);
     store(&mut fields.items[OUTPUT], &machine.output);
+    if def.extra != Extra::Conversion {
+        store(&mut fields.items[mek::ADVANCED_SECONDARY], &machine.extra);
+    }
     let nbt = &mut fields.nbt;
-    chem::write_tank(nbt, &machine.tank);
+    if def.tank > 0 {
+        chem::write_tank(nbt, &machine.tank);
+    }
     nbt.insert(JavaString::from("energy"), Tag::Int(machine.energy as i32));
     nbt.insert(JavaString::from("progress"), Tag::Int(machine.progress));
     nbt.insert(JavaString::from("used_so_far"), Tag::Int(machine.used_so_far));
@@ -130,6 +189,7 @@ fn mekmachine_advanced(
     data[mek::DATA_ENERGY_SIDES] = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
     data[chem::DATA_CHEMICAL_SIDES] = mek::pack_sides(&fields.nbt, chem::CHEMICAL_CONFIG, &mek::CHEMICAL_SIDE_CYCLE);
     data[chem::DATA_CHEMICAL] = machine.tank.held.as_ref().map_or(0, |held| held.amount as i32);
+    data[chem::DATA_CHEMICAL_KIND] = machine.tank.held.as_ref().map_or(0, |held| chem::chemical_kind(&held.id));
     mek::keep_recalculated(&fields.data, &mut data);
     fields.data = data;
     if machine.active != was_active {

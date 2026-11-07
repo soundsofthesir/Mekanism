@@ -13,15 +13,17 @@ fn mekmachine_container(block: &str, container: &mut Option<horizon_client::cont
         });
         return;
     }
-    if block == crate::game::mek::COMPRESSOR {
+    if let Some(def) = mekmachine_engine::process_table::process(block) {
         use crate::game::mek::{ADVANCED_SECONDARY, ADVANCED_SLOTS, ENERGY_SLOT};
+        use mekmachine_engine::process_table::Extra;
         const INPUT: usize = 0;
         const OUTPUT: usize = 1;
+        let by_product = def.extra == Extra::ByProduct;
         *container = Some(horizon_client::containers::ModContainer {
             slots: ADVANCED_SLOTS,
             faces: std::array::from_fn(|_| vec![INPUT, OUTPUT, ENERGY_SLOT, ADVANCED_SECONDARY]),
-            inputs: vec![INPUT, ENERGY_SLOT, ADVANCED_SECONDARY],
-            outputs: vec![OUTPUT],
+            inputs: if by_product { vec![INPUT, ENERGY_SLOT] } else { vec![INPUT, ENERGY_SLOT, ADVANCED_SECONDARY] },
+            outputs: if by_product { vec![OUTPUT, ADVANCED_SECONDARY] } else { vec![OUTPUT] },
             menu: Some(block.to_owned()),
         });
         return;
