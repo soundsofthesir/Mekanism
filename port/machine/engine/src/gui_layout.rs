@@ -142,6 +142,78 @@ pub const RIGHT_CLICK_BASE: i32 = 20;
 pub const SHIFT_CLICK_BASE: i32 = 40;
 pub const EJECT_BASE: i32 = 60;
 pub const CLEAR_BASE: i32 = EJECT_BASE + KIND_COUNT;
+pub const REDSTONE_NEXT: i32 = CLEAR_BASE + KIND_COUNT;
+pub const REDSTONE_PREVIOUS: i32 = REDSTONE_NEXT + 1;
+/// `PacketRemoveUpgrade`: one of a kind, by `UPGRADE_NAMES`' index, or with shift all of it.
+pub const UNINSTALL_ONE: i32 = REDSTONE_PREVIOUS + 1;
+pub const UNINSTALL_ALL: i32 = UNINSTALL_ONE + UPGRADE_KINDS as i32;
+
+/// `GuiUpgradeWindowTab.createWindow`, and `GuiUpgradeWindow`'s 76 plus one row of supported types.
+pub const UPGRADE_WINDOW: [f32; 4] = [(SCREEN_WIDTH - 198.0) / 2.0, 15.0, 198.0, 94.0];
+/// Inside that window.
+pub const UPGRADE_LIST: [f32; 4] = [6.0, 18.0, 108.0, 50.0];
+pub const UPGRADE_ROW_HEIGHT: f32 = 12.0;
+pub const UPGRADE_SCREEN: [f32; 4] = [114.0, 18.0, 59.0, 50.0];
+pub const UNINSTALL_BUTTON: [f32; 4] = [115.0, 54.0, 56.0, 12.0];
+pub const INSTALLING_ARROW: [f32; 4] = [176.0, 37.0, 10.0, 14.0];
+pub const UNINSTALLING_ARROW: [f32; 4] = [176.0, 58.0, 12.0, 12.0];
+/// The frames of `GuiVirtualSlot`; the item sits a pixel in.
+pub const UPGRADE_INPUT_FRAME: [f32; 2] = [175.0, 18.0];
+pub const UPGRADE_OUTPUT_FRAME: [f32; 2] = [175.0, 72.0];
+pub const UPGRADE_KINDS: usize = 2;
+pub const UPGRADE_NAMES: [&str; UPGRADE_KINDS] = ["Speed", "Energy"];
+/// Where a slot goes while the window that shows it is closed.
+pub const OFF_SCREEN: [f32; 2] = [-10_000.0, -10_000.0];
+
+/// A menu slot's position on the screen for a frame in the upgrade window.
+pub fn upgrade_slot_at(frame: [f32; 2]) -> [f32; 2] {
+    [UPGRADE_WINDOW[0] + frame[0] + 1.0, UPGRADE_WINDOW[1] + frame[1] + 1.0]
+}
+
+/// What a press means while the upgrade window is open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpgradePress {
+    /// Not ours: slots and the game's own handling.
+    Pass,
+    Nothing,
+    Close,
+    Select(usize),
+    Button(i32),
+}
+
+/// `installed` lists the kinds shown, top to bottom, and `selected` is the one chosen.
+pub fn press_upgrade_window(at: [f32; 2], installed: &[usize], selected: Option<usize>, click: Click) -> UpgradePress {
+    let [left, top, width, height] = UPGRADE_WINDOW;
+    if !inside(at, left, top, width, height) {
+        return UpgradePress::Pass;
+    }
+    let local = [at[0] - left, at[1] - top];
+    let [cx, cy, size] = CLOSE;
+    if inside(local, cx, cy, size, size) {
+        return UpgradePress::Close;
+    }
+    for frame in [UPGRADE_INPUT_FRAME, UPGRADE_OUTPUT_FRAME] {
+        if inside(local, frame[0], frame[1], 18.0, 18.0) {
+            return UpgradePress::Pass;
+        }
+    }
+    let [bx, by, bw, bh] = UNINSTALL_BUTTON;
+    if inside(local, bx, by, bw, bh) {
+        return match (selected, click) {
+            (Some(kind), Click::Left) => UpgradePress::Button(UNINSTALL_ONE + kind as i32),
+            (Some(kind), Click::Shift) => UpgradePress::Button(UNINSTALL_ALL + kind as i32),
+            _ => UpgradePress::Nothing,
+        };
+    }
+    let [lx, ly, lw, lh] = UPGRADE_LIST;
+    if inside(local, lx, ly, lw, lh) && click != Click::Right {
+        let row = ((local[1] - ly - 1.0) / UPGRADE_ROW_HEIGHT) as usize;
+        if let Some(kind) = installed.get(row) {
+            return UpgradePress::Select(*kind);
+        }
+    }
+    UpgradePress::Nothing
+}
 const ROW: i32 = 6;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,6 +243,7 @@ pub enum Press {
     CloseWindow,
     ShowKind(usize),
     Button(i32),
+    OpenUpgrades,
 }
 
 fn inside(at: [f32; 2], x: f32, y: f32, width: f32, height: f32) -> bool {
@@ -197,11 +270,16 @@ fn on_tab_button(at: [f32; 2], tab: [f32; 2]) -> bool {
 /// `window` is the kind the open side config window shows.
 pub fn press(at: [f32; 2], window: Option<usize>, kinds: &[usize], click: Click) -> Press {
     let Some(kind) = window else {
-        return if click != Click::Right && on_tab_button(at, SIDE_CONFIG_TAB) {
-            Press::OpenWindow
-        } else {
-            Press::Pass
-        };
+        if on_tab_button(at, REDSTONE_TAB) {
+            return Press::Button(if click == Click::Right { REDSTONE_PREVIOUS } else { REDSTONE_NEXT });
+        }
+        if click == Click::Right {
+            return Press::Pass;
+        }
+        if on_tab_button(at, UPGRADE_TAB) {
+            return Press::OpenUpgrades;
+        }
+        return if on_tab_button(at, SIDE_CONFIG_TAB) { Press::OpenWindow } else { Press::Pass };
     };
     if on_tab_button(at, SIDE_CONFIG_TAB) {
         return Press::CloseWindow;

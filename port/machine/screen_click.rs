@@ -8,7 +8,7 @@ fn mekmachine_screen_press(
     canceled: &mut bool,
 ) {
     use crate::game::gui;
-    use mekmachine_engine::gui_layout::{Click, Press, press};
+    use mekmachine_engine::gui_layout::{Click, Press, UpgradePress, press, press_upgrade_window};
     const LEFT_BUTTON: i32 = 0;
     const RIGHT_BUTTON: i32 = 1;
     const SHIFT: u32 = 1;
@@ -23,6 +23,17 @@ fn mekmachine_screen_press(
     };
     let origin = gui::origin();
     let at = [screen.mouse[0] - origin[0], screen.mouse[1] - origin[1]];
+    if gui::upgrades_open() {
+        match press_upgrade_window(at, &gui::installed_kinds(), gui::selected_upgrade(), click) {
+            UpgradePress::Pass => return,
+            UpgradePress::Nothing => {}
+            UpgradePress::Close => gui::set_upgrades_open(false),
+            UpgradePress::Select(kind) => gui::select_upgrade(kind),
+            UpgradePress::Button(id) => game.mek_send_menu_button(id),
+        }
+        *canceled = true;
+        return;
+    }
     match press(at, gui::open_kind(), gui::shown_kinds(), click) {
         Press::Pass => return,
         Press::Nothing => {}
@@ -30,6 +41,7 @@ fn mekmachine_screen_press(
         Press::CloseWindow => gui::set_open_kind(None),
         Press::ShowKind(kind) => gui::set_open_kind(Some(kind)),
         Press::Button(id) => game.mek_send_menu_button(id),
+        Press::OpenUpgrades => gui::set_upgrades_open(true),
     }
     *canceled = true;
 }

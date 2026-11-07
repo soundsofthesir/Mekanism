@@ -20,7 +20,7 @@ fn mekmachine_screen(block: &str, screen: &mut Option<horizon_client::mod_api::N
         *screen = Some(horizon_client::mod_api::NativeScreen {
             width: layout::SCREEN_WIDTH,
             height: layout::SCREEN_HEIGHT,
-            slots: vec![Some(input), None, None],
+            slots: vec![Some(input), None, None, Some(layout::OFF_SCREEN), Some(layout::OFF_SCREEN)],
             inventory_y: layout::INVENTORY[1],
             inventory_x: layout::INVENTORY[0],
             own_labels: true,
@@ -37,7 +37,7 @@ fn mekmachine_screen(block: &str, screen: &mut Option<horizon_client::mod_api::N
         width: layout::SCREEN_WIDTH,
         height: layout::SCREEN_HEIGHT,
         // The energy item slot is left out until something it charges from is ported.
-        slots: vec![Some(input), Some(output), None],
+        slots: vec![Some(input), Some(output), None, Some(layout::OFF_SCREEN), Some(layout::OFF_SCREEN)],
         inventory_y: layout::INVENTORY[1],
         inventory_x: layout::INVENTORY[0],
         own_labels: true,

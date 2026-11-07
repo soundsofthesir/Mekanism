@@ -1,12 +1,34 @@
-fn mekmachine_menu_button(entity: &mut horizon_client::containers::ModBlockEntity, id: i32) {
+fn mekmachine_menu_button(
+    game: &mut crate::game::Game<'_>,
+    pos: [i32; 3],
+    entity: &mut horizon_client::containers::ModBlockEntity,
+    id: i32,
+) {
     use crate::game::mek;
     use crate::game::chem;
-    use mekmachine_engine::gui_layout::{CHEMICAL_KIND, CLEAR_BASE, EJECT_BASE, ENERGY_KIND, RIGHT_CLICK_BASE, SHIFT_CLICK_BASE};
+    use mekmachine_engine::gui_layout::{
+        CHEMICAL_KIND, CLEAR_BASE, EJECT_BASE, ENERGY_KIND, REDSTONE_NEXT, REDSTONE_PREVIOUS, RIGHT_CLICK_BASE,
+        SHIFT_CLICK_BASE, UNINSTALL_ALL, UNINSTALL_ONE, UPGRADE_KINDS,
+    };
     const KINDS: i32 = 3;
     if !crate::game::Game::mek_has_machine_screen(&entity.id) {
         return;
     }
+    let _ = pos;
+    let kinds = UPGRADE_KINDS as i32;
+    if (UNINSTALL_ONE..UNINSTALL_ONE + kinds).contains(&id) {
+        game.mek_uninstall(entity, (id - UNINSTALL_ONE) as usize, false);
+        return;
+    }
+    if (UNINSTALL_ALL..UNINSTALL_ALL + kinds).contains(&id) {
+        game.mek_uninstall(entity, (id - UNINSTALL_ALL) as usize, true);
+        return;
+    }
     let nbt = &mut entity.nbt;
+    if id == REDSTONE_NEXT || id == REDSTONE_PREVIOUS {
+        mek::cycle_control(nbt, id == REDSTONE_NEXT);
+        return;
+    }
     let config_of = |kind: usize| {
         match kind {
             ENERGY_KIND => (mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE[..], mek::ENERGY_EJECT),

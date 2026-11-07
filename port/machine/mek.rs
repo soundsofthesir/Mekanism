@@ -112,8 +112,24 @@ pub(crate) const DATA_CAPACITY: usize = 3;
 pub(crate) const DATA_ITEM_SIDES: usize = 4;
 pub(crate) const DATA_ENERGY_SIDES: usize = 5;
 pub(crate) const DATA_USING: usize = 6;
+/// The high halves of the energy amounts, each of which takes two 16-bit slots.
+pub(crate) const DATA_ENERGY_HIGH: usize = 10;
+pub(crate) const DATA_CAPACITY_HIGH: usize = 11;
+pub(crate) const DATA_USING_HIGH: usize = 12;
+pub(crate) const DATA_CONTROL: usize = 13;
+pub(crate) const DATA_SPEED: usize = 14;
+pub(crate) const DATA_ENERGY_UPGRADES: usize = 15;
+pub(crate) const DATA_INSTALL_TICKS: usize = 16;
 /// The menu's data slots, the same for every machine. The oxidizer also fills the chemical ones.
-pub(crate) const DATA_SLOTS: usize = 10;
+pub(crate) const DATA_SLOTS: usize = 17;
+/// Menu slots of every machine with upgrades: `TileComponentUpgrade`'s two.
+pub(crate) const UPGRADE_INPUT: usize = 3;
+pub(crate) const UPGRADE_OUTPUT: usize = 4;
+pub(crate) const MACHINE_SLOTS: usize = 5;
+pub(crate) const UPGRADE_COMPONENT: &str = "mekanism:upgrade_type";
+pub(crate) const UPGRADE_ITEM: &str = "mekanism:upgrade";
+/// `UPGRADE_NAMES`' order.
+pub(crate) const UPGRADE_IDS: [&str; 2] = ["mekanism:speed", "mekanism:energy"];
 /// The data slots of the generator's menu.
 pub(crate) const GENERATOR_DATA_LAVA: usize = 0;
 pub(crate) const GENERATOR_DATA_ENERGY: usize = 1;
@@ -162,6 +178,68 @@ pub(crate) fn upgrades_of(nbt: &Compound) -> Upgrades {
         _ => 0,
     };
     Upgrades { speed: count("mekanism:speed"), energy: count("mekanism:energy") }
+}
+
+/// Fills what every upgradable machine's menu shares.
+pub(crate) fn fill_menu(data: &mut [i32], nbt: &Compound, energy: i64, capacity: i64, using: i64) {
+    use mekmachine_engine::upgrades::{high_half, low_half};
+    data[DATA_ENERGY] = low_half(energy);
+    data[DATA_ENERGY_HIGH] = high_half(energy);
+    data[DATA_CAPACITY] = low_half(capacity);
+    data[DATA_CAPACITY_HIGH] = high_half(capacity);
+    data[DATA_USING] = low_half(using);
+    data[DATA_USING_HIGH] = high_half(using);
+    let upgrades = upgrades_of(nbt);
+    data[DATA_SPEED] = upgrades.speed as i32;
+    data[DATA_ENERGY_UPGRADES] = upgrades.energy as i32;
+    data[DATA_INSTALL_TICKS] = match nbt.get(&JavaString::from(INSTALL_TICKS_KEY)) {
+        Some(Tag::Int(ticks)) => *ticks,
+        _ => 0,
+    };
+    let control = match nbt.get(&JavaString::from("control_type")) {
+        Some(Tag::String(mode)) => mode.to_string_lossy(),
+        _ => String::new(),
+    };
+    let modes = mekmachine_engine::upgrades::CONTROL_MODES;
+    data[DATA_CONTROL] = modes.iter().position(|mode| *mode == control).unwrap_or(0) as i32;
+}
+
+const INSTALL_TICKS_KEY: &str = "upgrade_ticks";
+
+/// `IRedstoneControl.setControlType`, by a press on the tab.
+pub(crate) fn cycle_control(nbt: &mut Compound, forward: bool) {
+    let mode = match nbt.get(&JavaString::from("control_type")) {
+        Some(Tag::String(mode)) => mode.to_string_lossy(),
+        _ => String::new(),
+    };
+    let next = mekmachine_engine::upgrades::next_control(&mode, forward);
+    nbt.insert(JavaString::from("control_type"), Tag::String(JavaString::from(next)));
+}
+
+/// Which of `UPGRADE_IDS` a saved `component_upgrade` count goes under.
+fn set_installed(nbt: &mut Compound, id: &str, count: i32) {
+    let component = nbt
+        .entry(JavaString::from("component_upgrade"))
+        .or_insert_with(|| Tag::Compound(Compound::new()));
+    let Tag::Compound(component) = component else {
+        return;
+    };
+    let upgrades = component
+        .entry(JavaString::from("upgrades"))
+        .or_insert_with(|| Tag::Compound(Compound::new()));
+    let Tag::Compound(upgrades) = upgrades else {
+        return;
+    };
+    if count > 0 {
+        upgrades.insert(JavaString::from(id), Tag::Int(count));
+    } else {
+        upgrades.remove(&JavaString::from(id));
+    }
+}
+
+fn installed_of(nbt: &Compound, id: &str) -> i32 {
+    let upgrades = upgrades_of(nbt);
+    if id == UPGRADE_IDS[0] { upgrades.speed as i32 } else { upgrades.energy as i32 }
 }
 
 pub(crate) fn is_ejecting(nbt: &Compound, eject: &str) -> bool {
@@ -476,7 +554,7 @@ impl Game<'_> {
     }
 
     /// `MachineEnergyContainer`'s capacity when upgrades change it from what `energy.rs` declares.
-    fn mek_upgraded_capacity(id: &str, nbt: &Compound) -> Option<i64> {
+    pub(crate) fn mek_upgraded_capacity(id: &str, nbt: &Compound) -> Option<i64> {
         let (usage, ticks) = match id {
             "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => (5, 200),
             "mekanism:crusher" => (8, 200),
@@ -486,8 +564,8 @@ impl Game<'_> {
             }
             _ => return None,
         };
-        let upgrades = upgrades_of(nbt);
-        (upgrades != Upgrades::default()).then(|| upgrades.capacity(usage, ticks))
+        nbt.contains_key(&JavaString::from("component_upgrade"))
+            .then(|| upgrades_of(nbt).recalculated_capacity(usage, ticks))
     }
 
     fn mek_write_cable(&mut self, pos: [i32; 3], energy: i64) {
@@ -643,6 +721,90 @@ impl Game<'_> {
         for (cable, share) in cables.iter().zip(split(left, &room)) {
             self.mek_write_cable(*cable, share);
         }
+    }
+
+    /// `TileComponentUpgrade`'s upgrade kind for an item in its slot.
+    pub(crate) fn mek_upgrade_kind(&self, stack: &horizon_client::items::ItemStack) -> Option<&'static str> {
+        if &*stack.item != UPGRADE_ITEM {
+            return None;
+        }
+        let kind = self.native_component(stack, UPGRADE_COMPONENT).ok().flatten()?;
+        let Tag::String(kind) = kind else {
+            return None;
+        };
+        let kind = kind.to_string_lossy();
+        UPGRADE_IDS.iter().find(|id| **id == kind).copied()
+    }
+
+    /// `MachineEnergyContainer.setMaxEnergy`: a smaller capacity cuts what's stored.
+    fn mek_clamp_energy(entity: &mut horizon_client::containers::ModBlockEntity) {
+        let Some(capacity) = Self::mek_upgraded_capacity(&entity.id, &entity.nbt) else {
+            return;
+        };
+        let held = energy_of(&entity.nbt);
+        if held > capacity {
+            entity.nbt.insert(JavaString::from("energy"), Tag::Int(capacity as i32));
+        }
+    }
+
+    /// `TileComponentUpgrade.tickServer`.
+    pub(crate) fn mek_tick_upgrades(&mut self, entity: &mut horizon_client::containers::ModBlockEntity) {
+        entity.items.resize(MACHINE_SLOTS, None);
+        let found = entity.items[UPGRADE_INPUT].clone().and_then(|stack| {
+            self.mek_upgrade_kind(&stack).map(|kind| (kind, stack.count as i32))
+        });
+        let ticks = match entity.nbt.get(&JavaString::from(INSTALL_TICKS_KEY)) {
+            Some(Tag::Int(ticks)) => *ticks,
+            _ => 0,
+        };
+        let Some((kind, count)) = found else {
+            entity.nbt.insert(JavaString::from(INSTALL_TICKS_KEY), Tag::Int(0));
+            return;
+        };
+        let installed = installed_of(&entity.nbt, kind);
+        let (ticks, added) = mekmachine_engine::upgrades::install_tick(ticks, installed, count);
+        entity.nbt.insert(JavaString::from(INSTALL_TICKS_KEY), Tag::Int(ticks));
+        if added > 0 {
+            set_installed(&mut entity.nbt, kind, installed + added);
+            let left = count - added;
+            entity.items[UPGRADE_INPUT] = if left > 0 {
+                entity.items[UPGRADE_INPUT].clone().map(|stack| horizon_client::items::ItemStack { count: left as u32, ..stack })
+            } else {
+                None
+            };
+            Self::mek_clamp_energy(entity);
+        }
+    }
+
+    /// `TileComponentUpgrade.removeUpgrade`: what the output slot can't hold stays installed. A
+    /// press removes one, or with shift all of that kind.
+    pub(crate) fn mek_uninstall(&mut self, entity: &mut horizon_client::containers::ModBlockEntity, kind: usize, all: bool) {
+        let Some(id) = UPGRADE_IDS.get(kind).copied() else {
+            return;
+        };
+        let installed = installed_of(&entity.nbt, id);
+        if installed <= 0 {
+            return;
+        }
+        entity.items.resize(MACHINE_SLOTS, None);
+        let mut one = horizon_client::items::ItemStack::new(UPGRADE_ITEM, 1);
+        if self.native_set_component(&mut one, UPGRADE_COMPONENT, Tag::String(JavaString::from(id))).is_err() {
+            return;
+        }
+        let most = self.containers_max_stack(&one) as i32;
+        let wanted = if all { installed } else { 1 };
+        let (held, room) = match &entity.items[UPGRADE_OUTPUT] {
+            None => (0, most),
+            Some(old) if old.same_item_same_components(&one) => (old.count as i32, most - old.count as i32),
+            Some(_) => return,
+        };
+        let removed = wanted.min(room);
+        if removed <= 0 {
+            return;
+        }
+        entity.items[UPGRADE_OUTPUT] = Some(horizon_client::items::ItemStack { count: (held + removed) as u32, ..one });
+        set_installed(&mut entity.nbt, id, installed - removed);
+        Self::mek_clamp_energy(entity);
     }
 
     /// `TileComponentEjector.outputItems` for one output slot: a whole stack leaves in one attempt,

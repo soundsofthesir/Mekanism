@@ -17,14 +17,25 @@ WORK = HERE / ".work"
 REFERENCE = HERE / "reference"
 Y = 200
 NORMAL_TICK_RATE = 20
-PREFIXES = ("upgrade_", "redstone_", "eject_")
+PREFIXES = ("upgrade_", "redstone_", "eject_", "install_")
+UPGRADE_SLOT = re.compile(r'items:\[\{container:0b,stored:\{amount:(\d+)L,type:\{id:"mekanism:upgrade",components:\{("[^"]+":"[^"]+")\}\}\}\}\]')
 ITEM = re.compile(r'\{container:(\d+)b,stored:\{amount:(\d+)L,type:\{id:"([^"]+)"\}\}\}')
 
 
 def here_format(block: str) -> str:
-    """The recording's block data in this port's format: its items and energy are Horizon's."""
+    """The recording's block data in this port's format: its items and energy are Horizon's, and the
+    upgrade slot is the container's slot 3 rather than `component_upgrade.items`."""
+    extra = ""
+    found = UPGRADE_SLOT.search(block)
+    if found:
+        extra = f'{{Slot:3b,id:"mekanism:upgrade",count:{found.group(1)},components:{{{found.group(2)}}}}}'
+        block = block.replace(found.group(0), "").replace(",}", "}")
     block = ITEM.sub(lambda m: f'{{Slot:{m.group(1)}b,id:"{m.group(3)}",count:{m.group(2)}}}', block)
     block = block.replace("items:[", "Items:[")
+    if extra and "Items:[" in block:
+        block = re.sub(r"Items:\[([^\]]*)\]", lambda m: f"Items:[{m.group(1)},{extra}]", block, count=1)
+    elif extra:
+        block = block.replace("{", f"{{Items:[{extra}],", 1)
     return re.sub(r"energy_container:\{stored:(\d+)L\}", r"energy:\1", block)
 
 
@@ -32,16 +43,40 @@ def here_command(line: str) -> str:
     return line.replace(f" {java.Y} ", f" {Y} ")
 
 
+def item_entries(nbt: str) -> list[str]:
+    """The compounds directly inside `Items`, each of which may nest its components."""
+    start = nbt.find("Items: [")
+    if start < 0:
+        return []
+    entries, depth, begin = [], 0, 0
+    for at in range(start + len("Items: ["), len(nbt)):
+        if nbt[at] == "{":
+            begin = at if depth == 0 else begin
+            depth += 1
+        elif nbt[at] == "}":
+            depth -= 1
+            if depth == 0:
+                entries.append(nbt[begin : at + 1])
+        elif nbt[at] == "]" and depth == 0:
+            break
+    return entries
+
+
 def slot_of(nbt: str, slot: int) -> str:
-    items = re.search(r"Items: \[(.*?)\]", nbt)
-    for entry in re.findall(r"\{[^{}]*\}", items.group(1) if items else ""):
-        if re.search(rf"Slot: {slot}b", entry):
+    for entry in item_entries(nbt):
+        if f"Slot: {slot}b" in entry:
             count = re.search(r"count: (\d+)", entry)
-            return f'{re.search(r'id: "([^"]+)"', entry).group(1)}x{count.group(1)}'
+            return f'{re.search(r'\bid: "([^"]+)"', entry).group(1)}x{count.group(1)}'
     return "-"
 
 
-def row(world, tick: str, has_chest: bool) -> list[str]:
+def upgrade_columns(nbt: str) -> list[str]:
+    installed = lambda name: (re.search(rf'"mekanism:{name}": (\d+)', nbt) or [None, "0"])[1]
+    held = slot_of(nbt, 3)
+    return [installed("speed"), installed("energy"), held.split("x")[-1] if held != "-" else "0"]
+
+
+def row(world, tick: str, has_chest: bool, has_upgrades: bool = False) -> list[str]:
     nbt = " ".join(world.command(f"data get block 0 {Y} 0"))
     get = lambda pattern: (re.search(pattern, nbt) or [None, "0"])[1]
     tank = re.search(r"chemical_tanks: \[\{container: 0b, stored: \{amount: (\d+)L", nbt)
@@ -54,6 +89,7 @@ def row(world, tick: str, has_chest: bool) -> list[str]:
         slot_of(nbt, 1),
         tank.group(1) if tank else "0",
         java.chest_items(" ".join(world.command(f"data get block 1 {Y} 0"))) if has_chest else "-",
+        *(upgrade_columns(nbt) if has_upgrades else []),
     ]
 
 
@@ -80,13 +116,14 @@ def replay(world, scenario: java.Scenario) -> list[str]:
     changes = dict(scenario.changes)
     failures = []
     has_chest = any("chest" in block for block in scenario.blocks)
+    has_upgrades = scenario.name.startswith("install_")
     for line in expected[2:]:
         wanted = line.split("\t")
         tick = int(wanted[0])
         if tick in changes:
             world.command(here_command(changes[tick]))
         step(world)
-        got = row(world, wanted[0], has_chest)
+        got = row(world, wanted[0], has_chest, has_upgrades)
         if got != wanted:
             failures.append(f"{scenario.name} tick {tick}: got {got} expected {wanted}")
             break

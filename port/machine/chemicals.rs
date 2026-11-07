@@ -52,7 +52,8 @@ fn mekmachine_chemicals(
     }
 
     const INPUT: usize = 0;
-    const SLOTS: usize = 3;
+    const SLOTS: usize = crate::game::mek::MACHINE_SLOTS;
+    game.mek_tick_upgrades(entity);
     let stack = entity
         .items
         .get(INPUT)
@@ -116,7 +117,10 @@ fn mekmachine_chemicals(
     }
     use crate::game::mek;
     let mut data = vec![0; mek::DATA_SLOTS];
-    data[mek::DATA_USING] = if machine.active { energy_per_tick as i32 } else { 0 };
+    let capacity = upgrades.capacity(chemical::OXIDIZER_USAGE, chemical::OXIDIZER_TICKS);
+    let using = if machine.active { energy_per_tick } else { 0 };
+    let capacity = crate::game::Game::mek_upgraded_capacity(&fields.id, &fields.nbt).unwrap_or(capacity);
+    mek::fill_menu(&mut data, &fields.nbt, machine.energy, capacity, using);
     data[mek::DATA_ITEM_SIDES] = mek::pack_sides(&fields.nbt, mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE);
     data[mek::DATA_ENERGY_SIDES] = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
     data[chem::DATA_CHEMICAL_SIDES] = mek::pack_sides(&fields.nbt, chem::CHEMICAL_CONFIG, &mek::CHEMICAL_SIDE_CYCLE);
@@ -125,8 +129,6 @@ fn mekmachine_chemicals(
     });
     data[crate::game::mek::DATA_PROGRESS] = machine.progress;
     data[crate::game::mek::DATA_TICKS] = ticks;
-    data[crate::game::mek::DATA_ENERGY] = machine.energy as i32;
-    data[crate::game::mek::DATA_CAPACITY] = upgrades.capacity(chemical::OXIDIZER_USAGE, chemical::OXIDIZER_TICKS) as i32;
     data[chem::DATA_CHEMICAL] = machine.output.held.as_ref().map_or(0, |held| held.amount as i32);
     fields.data = data;
 }

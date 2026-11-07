@@ -22,6 +22,13 @@ fn mekmachine_container_accepts(
     if !crate::game::Game::mek_is_machine(&entity.id) && entity.id != crate::game::chem::OXIDIZER {
         return;
     }
+    if slot == mek::UPGRADE_INPUT {
+        // `UpgradeInventorySlot.input`: by hand only, and only what this port's machines support.
+        if face.is_some() || game.mek_upgrade_kind(stack).is_none() {
+            *cancel = true;
+        }
+        return;
+    }
     let side_is_input = face.is_none_or(|face| {
         let index = mek::relative_index(game.mek_facing(pos), face);
         mek::side_value(&entity.nbt, mek::ITEM_CONFIG, index) == mek::SIDE_INPUT

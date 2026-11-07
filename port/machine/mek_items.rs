@@ -5,6 +5,10 @@ use horizon_client::items::ItemStack;
 use horizon_core::geometry::Direction;
 
 impl Game<'_> {
+    pub(in crate::game) fn containers_max_stack(&self, stack: &ItemStack) -> u32 {
+        self.containers().max_stack(stack)
+    }
+
     /// `ResourceHandler.insert` through `face` of the container at `at`, as a hopper does it. What
     /// didn't fit, or the whole stack when there is no container. A machine's slot can hold more than
     /// a chest's, and Horizon's move drops whatever is past one stack, so this sends a stack at a time.

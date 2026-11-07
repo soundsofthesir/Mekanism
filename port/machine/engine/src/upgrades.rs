@@ -31,6 +31,12 @@ impl Upgrades {
         (base as f64 * MULTIPLIER.powf(2.0 * self.speed_share() - self.energy_share())).ceil() as i64
     }
 
+    /// What `recalculateUpgrades` sets once it has run at all, even with nothing installed: when a
+    /// machine loads a saved `component_upgrade`, or after an install or an uninstall.
+    pub fn recalculated_capacity(self, base_usage: i64, base_ticks: i32) -> i64 {
+        self.energy_per_tick(base_usage) * i64::from(self.ticks(base_ticks).max(STORAGE_MULTIPLIER as i32))
+    }
+
     /// `updateMaxEnergy`, which only runs once something is installed.
     pub fn capacity(self, base_usage: i64, base_ticks: i32) -> i64 {
         if self == Self::default() {
@@ -74,6 +80,49 @@ impl EjectTimer {
             EjectTick { delay: self.delay - 1, attempts: false }
         }
     }
+}
+
+/// `IRedstoneControl.RedstoneControl`'s order, as saved in `control_type`. `pulse` comes last.
+pub const CONTROL_MODES: [&str; 4] = ["disabled", "high", "low", "pulse"];
+/// The modes a press reaches: `ITileRedstone.supportsMode` leaves out `pulse` on these machines.
+const SUPPORTED_MODES: usize = 3;
+
+/// The next mode, or the previous one for a right click (`getNext`, `getPrevious`).
+pub fn next_control(mode: &str, forward: bool) -> &'static str {
+    let at = CONTROL_MODES[..SUPPORTED_MODES].iter().position(|each| *each == mode).unwrap_or(0);
+    let step = if forward { 1 } else { SUPPORTED_MODES - 1 };
+    CONTROL_MODES[(at + step) % SUPPORTED_MODES]
+}
+
+/// `TileComponentUpgrade.UPGRADE_TICKS_REQUIRED`, `SharedConstants.TICKS_PER_SECOND`.
+pub const INSTALL_TICKS: i32 = 20;
+/// `Upgrade.max` of speed and energy upgrades.
+pub const MAX_OF_A_KIND: i32 = 8;
+
+/// One tick of `TileComponentUpgrade.tickServer` with a supported upgrade in the slot: the counter
+/// next, and how many upgrades go in. It waits `INSTALL_TICKS` ticks and then moves all it can.
+pub fn install_tick(ticks: i32, installed: i32, in_slot: i32) -> (i32, i32) {
+    if installed >= MAX_OF_A_KIND {
+        (0, 0)
+    } else if ticks < INSTALL_TICKS {
+        (ticks + 1, 0)
+    } else {
+        (0, (MAX_OF_A_KIND - installed).min(in_slot))
+    }
+}
+
+/// Menu data slots hold 16 bits, so a larger value takes two. Its low half.
+pub fn low_half(value: i64) -> i32 {
+    (value & 0xFFFF) as i32
+}
+
+pub fn high_half(value: i64) -> i32 {
+    ((value >> 16) & 0xFFFF) as i32
+}
+
+/// A value back from its two data slots, whichever way the network signed each half.
+pub fn from_halves(low: i32, high: i32) -> i64 {
+    i64::from(low & 0xFFFF) | i64::from(high & 0xFFFF) << 16
 }
 
 #[cfg(test)]
@@ -127,5 +176,31 @@ mod tests {
             timer = EjectTimer { delay: next.delay };
         }
         assert_eq!(attempts, [1, 12, 23]);
+    }
+
+    #[test]
+    fn a_value_survives_two_sixteen_bit_slots() {
+        for value in [0, 1, 32_767, 32_768, 65_535, 65_536, 4_000_000, 256_000_000, 2_147_483_647] {
+            let (low, high) = (low_half(value), high_half(value));
+            assert_eq!(from_halves(low, high), value);
+            // As a network short, sign-extended.
+            assert_eq!(from_halves(i32::from(low as i16), i32::from(high as i16)), value);
+        }
+    }
+
+    #[test]
+    fn install_waits_then_moves_what_fits() {
+        assert_eq!(install_tick(0, 0, 3), (1, 0));
+        assert_eq!(install_tick(19, 0, 3), (20, 0));
+        assert_eq!(install_tick(20, 0, 3), (0, 3));
+        assert_eq!(install_tick(20, 7, 5), (0, 1));
+        assert_eq!(install_tick(5, 8, 2), (0, 0));
+    }
+
+    #[test]
+    fn control_modes_cycle_both_ways() {
+        assert_eq!(next_control("disabled", true), "high");
+        assert_eq!(next_control("low", true), "disabled");
+        assert_eq!(next_control("disabled", false), "low");
     }
 }

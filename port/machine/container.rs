@@ -4,7 +4,7 @@ fn mekmachine_container(block: &str, container: &mut Option<horizon_client::cont
         const OUTPUT: usize = 1;
         const ENERGY: usize = 2;
         *container = Some(horizon_client::containers::ModContainer {
-            slots: 3,
+            slots: crate::game::mek::MACHINE_SLOTS,
             // Every side reaches every slot here; `container_accepts` applies the saved config.
             faces: std::array::from_fn(|_| vec![INPUT, OUTPUT, ENERGY]),
             inputs: vec![INPUT, ENERGY],
@@ -18,7 +18,7 @@ fn mekmachine_container(block: &str, container: &mut Option<horizon_client::cont
         const CHEMICAL_ITEM: usize = 1;
         const ENERGY: usize = 2;
         *container = Some(horizon_client::containers::ModContainer {
-            slots: 3,
+            slots: crate::game::mek::MACHINE_SLOTS,
             faces: std::array::from_fn(|_| vec![INPUT, CHEMICAL_ITEM, ENERGY]),
             inputs: vec![INPUT, ENERGY],
             outputs: vec![CHEMICAL_ITEM],

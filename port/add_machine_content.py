@@ -11,9 +11,9 @@ from pathlib import Path
 MACHINES = ("enrichment_chamber", "crusher", "energized_smelter")
 # The machine mod registers this block, so the carried definition has to go.
 OXIDIZER = "chemical_oxidizer"
-# Input, output, energy item. The output slot only gives.
-MACHINE_MENU = {"slots": 3, "data_slots": 10, "results": [1]}
-OXIDIZER_MENU = {"slots": 3, "data_slots": 10, "results": [1]}
+# Input, output, energy item, upgrade input, upgrade output. The output slots only give.
+MACHINE_MENU = {"slots": 5, "data_slots": 17, "results": [1, 4]}
+OXIDIZER_MENU = {"slots": 5, "data_slots": 17, "results": [1, 4]}
 # The fuel slot. Lava, energy, temperature.
 GENERATOR_MENU = {"slots": 1, "data_slots": 3}
 
