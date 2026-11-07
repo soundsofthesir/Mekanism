@@ -80,6 +80,7 @@ GROUPS = {
     "chain": ("test_chain.py", (SINGLE, DEDICATED), []),
     "chemical": ("test_chemical.py", (SINGLE, DEDICATED), []),
     "features": ("test_features.py", (SINGLE, DEDICATED), []),
+    "reload": ("test_reload.py", (SINGLE, DEDICATED), []),
 }
 
 # The first matching rule wins. Paths are relative to the project.
@@ -90,6 +91,10 @@ RULES = [
     ("port/build_and_test.sh", []),
     ("port/README.md", []),
     ("PLAN.md", []),
+    ("port/java_reference_reload.py", ["reload"]),
+    ("port/test_reload.py", ["reload"]),
+    ("port/reference/reload_*", ["reload"]),
+    ("port/reference/live_*", ["reload"]),
     ("port/java_reference_chemical.py", ["chemical"]),
     ("port/java_reference_features.py", ["features"]),
     ("port/java_*", []),

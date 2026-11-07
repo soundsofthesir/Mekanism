@@ -186,7 +186,7 @@ Item ejecting. `mek_eject_items` follows `TileComponentEjector`: an attempt on t
 
 Upgrades and redstone by a player. The redstone tab cycles `disabled`, `high`, `low` and back. `ITileRedstone.supportsMode` leaves out `pulse` on these machines. The upgrade tab opens `GuiUpgradeWindow`: a list, a screen, Uninstall (shift for all), two slots that exist only while the window is open, and arrows. A window's slots move by `mek_screen_frame`, which runs on the `frame` hook and rewrites the open screen's slot positions, off screen when closed. `port/java_reference_features.py` records `install_*`: the slot counts 20 ticks and installs on tick 21, as many as fit. `port/test_upgrades.py` does all of this by clicks and then compares 30 rows of `redstone_high` and 140 rows of `upgrade_run_speed4` with the recording, from the state the clicks reached. Broken and failed: redstone buttons swapped ("got low, expected high"), uninstall removes 2 ("got 2, expected 3"), the slot's frame a pixel off ("got [165, 35]"), install ticks 20 to 19 (`features`).
 
-A finding from `install_running`: once `recalculateUpgrades` has run, capacity is `usage * max(4, ticks)`, even with nothing installed, so a chamber holds 1,000 rather than 20. It runs when `component_upgrade` loads and after any install or uninstall. The port copies that when the key is present.
+A finding from `install_running`: once `recalculateUpgrades` has run, capacity is `usage * max(4, ticks)`, even with nothing installed, so a chamber holds 1,000 rather than 20. It runs when `component_upgrade` loads and after any install or uninstall.
 
 Wide menu values. Energy, capacity and usage take two 16-bit data slots each, by `low_half`, `high_half` and `from_halves`, which allow for either sign. The engine tests it at 32,767, 32,768, 65,536, 4,000,000 and more. `port/test_cube_screen.py` reads the cube's gauge from screenshots at 32,767, 32,768, 40,000, 65,536, 1,000,000, 2,000,000 and 4,000,000 FE. Ignoring the high half fails it ("gauge rows at 32767 FE: got 47, expected 1").
 
@@ -203,7 +203,7 @@ Full run on this work, `--all` after a rebuild: 22 of 23 runs passed in 886 s (1
 Known differences this batch leaves:
 
 - Upgrades: no sneak-use on a machine to install, no chemical, muffling or other kinds, no "supported" row or effect line in the window, and the window's list can't scroll (two kinds fit). The upgrade item has no icon, because Horizon lacks `mekanism:component_item`. Its slot's frame overlaps an inventory slot by 3 pixels, so a press on the frame's left edge takes the inventory slot. The window hides slot tooltips under it. The saved format is the container's slots 3 and 4, not `component_upgrade.items`.
-- A saved machine with nothing installed: the real mod always writes `component_upgrade`, so after a reload it holds 1,000. The port writes the key only after an install or uninstall, so a fresh machine stays at 20 after a reload. No recording covers this reload path.
+- Saved machines: see "Saved machines through a reload". The port's data has a `mek_recalculated` key that the real mod's hasn't, and a chunk unloading doesn't clear it, only a new process does.
 - Ejecting: `eject_delay` and `upgrade_ticks` are saved, where the real mod's reset on a reload. A cube's item eject button stays in the side window, where the real mod has `setCanEject(false)`, though it does nothing.
 - Energy slots: a player can place an empty tablet, which the real slot refuses. The tag `c:dusts/redstone` is reduced to redstone and a block of it in the slot's placement rule, though the recipes run from the real tag.
 - Tiers: no creative tier. Tubes and pipes have no pull. Cables of other tiers draw from their own textures, but only the basic one's look was checked by test. Each pipe and tube still has the plain model.
@@ -274,6 +274,29 @@ So it is not shown to be the mod's fault, and no change was made for it. `run_te
 `horizon_driver.run_test` wraps every test. A test calls `begin_checks` just before its first check. If the game has died by then, the test exits with code 75 and `run_tests.py` reports `LAUNCH CRASH`, runs the group once more and records that in the output and the last line. A second crash fails the group. Anything after `begin_checks`, or a failure with the game still alive, is a plain failure and never retried. A group that passes without calling `begin_checks` fails, so a test can't skip the mark.
 
 The runner gives each run a `port/.work/run-...` folder for the tests' folders. It stops anything left in them and removes them when it ends, including on SIGTERM, and clears any `tmp...` and `run-...` left by earlier runs when it starts. A process is identified by its arguments, or by its working directory or an open file in the folder, because macOS hides most processes' environments from `ps`. `port/test_run_tests.py` tests all of this with stand-ins and no game. A real launch was checked with an engine that exits at once (exit 75), and SIGTERM to the runner during a chain run left no process or folder. (The batch of 2026-11-07's later work renamed this outcome "launch failure". See "Stale engine guard and failure evidence".) A real segfault hasn't gone through this path, since none recurred. On a dedicated server the supervisor may restart a crashed engine, which would then show as a plain failure rather than a launch crash; that is unverified.
+
+### Saved machines through a reload
+
+This plan used to say the real mod always writes `component_upgrade`, so a fresh machine reloads holding 1,000 where the port stayed at 20. That was wrong, and came from reading `serialize` without a recording. `port/java_reference_reload.py` records 8 scenarios through a real server restart, and `port/test_reload.py` replays them in both modes, every field of every row:
+
+| Machine before the restart | Key saved | Holds after reload |
+|---|---|---|
+| Fresh, empty; fresh with 15 FE; fresh with ore | No | 20 |
+| Given `component_upgrade:{}` by command | No | 20 |
+| 4 speed upgrades installed | Yes | 3,150 |
+| None installed, 2 upgrades in the output slot | Yes | 1,000 |
+| The same, with the slot then emptied | No | 20 |
+| The same with no reload at all (`live_output_emptied`) | No | 1,000 |
+
+So the real rule is that the key is saved only if something is installed or in an upgrade slot, and a machine's capacity follows its upgrades only after a recalculation in this load.
+
+`chain_after_reload` passed because this path had no difference. Its chamber and smelter are fresh machines, and in all 901 rows, with a cube supplying them after the restart, neither holds more than 20. Port and recording agreed, and no check needed fixing. Making the port hold 1,000 on any fresh machine fails `chain` at `network_split` tick 1 and `reload` at `reload_fresh_empty` tick 1.
+
+The port did differ elsewhere. It treated the key's presence as the rule, so a machine with everything uninstalled stayed at 1,000 through a reload. Now capacity follows its upgrades if any are installed, or if a mark says this process has recalculated. An install, an uninstall or an item in either upgrade slot sets the mark, which holds the process's id, so a reload ignores it. The key goes when nothing is under it, as in the real mod.
+
+Breaks: the mark outlasting a reload fails `reload_output_emptied` tick 1 (got 1,000); slots not recalculating fails `reload_output_slot` tick 1 (got 20); the key kept after uninstalling all passed `upgrades` at first, so `test_upgrades` now uninstalls all and fails with `no saved upgrades once all are uninstalled`.
+
+Known differences: the port learns of a slot's item in its first tick, where the real mod does as it loads. `test_reload` allows for that with one tick before its first row, with nothing supplying the machines. The real mod saves the slots under `component_upgrade.items`, and the port as container slots 3 and 4, so the test's `component` column reads either. A player re-entering a single-player world in one process, or a chunk unloading, doesn't reset the mark. Neither is recorded.
 
 ### Stale engine guard and failure evidence
 

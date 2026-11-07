@@ -246,24 +246,54 @@ pub(crate) fn cycle_control(nbt: &mut Compound, forward: bool) {
     nbt.insert(JavaString::from("control_type"), Tag::String(JavaString::from(next)));
 }
 
-/// Which of `UPGRADE_IDS` a saved `component_upgrade` count goes under.
+/// A machine's capacity follows its upgrades once `recalculateUpgrades` has run, which it does when
+/// `component_upgrade` loads and at any install or uninstall. The real mod's saved data has that key
+/// only if something is installed or in an upgrade slot, so this mark, like its in-memory value,
+/// must not outlast the process. See `reload_*` in `port/reference`.
+const RECALCULATED_KEY: &str = "mek_recalculated";
+
+fn this_process() -> i32 {
+    static ID: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
+    *ID.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.subsec_nanos());
+        (std::process::id() ^ nanos) as i32
+    })
+}
+
+fn mark_recalculated(nbt: &mut Compound) {
+    nbt.insert(JavaString::from(RECALCULATED_KEY), Tag::Int(this_process()));
+}
+
+fn is_recalculated(nbt: &Compound) -> bool {
+    let installed = upgrades_of(nbt);
+    installed.speed > 0
+        || installed.energy > 0
+        || matches!(nbt.get(&JavaString::from(RECALCULATED_KEY)), Some(Tag::Int(mark)) if *mark == this_process())
+}
+
+/// Which of `UPGRADE_IDS` a saved `component_upgrade` count goes under. Like the real mod's, the key
+/// goes when nothing is left under it.
 fn set_installed(nbt: &mut Compound, id: &str, count: i32) {
-    let component = nbt
-        .entry(JavaString::from("component_upgrade"))
-        .or_insert_with(|| Tag::Compound(Compound::new()));
-    let Tag::Compound(component) = component else {
+    mark_recalculated(nbt);
+    let key = JavaString::from("component_upgrade");
+    let Tag::Compound(component) = nbt.entry(key.clone()).or_insert_with(|| Tag::Compound(Compound::new())) else {
         return;
     };
-    let upgrades = component
+    let Tag::Compound(upgrades) = component
         .entry(JavaString::from("upgrades"))
-        .or_insert_with(|| Tag::Compound(Compound::new()));
-    let Tag::Compound(upgrades) = upgrades else {
+        .or_insert_with(|| Tag::Compound(Compound::new()))
+    else {
         return;
     };
     if count > 0 {
         upgrades.insert(JavaString::from(id), Tag::Int(count));
     } else {
         upgrades.remove(&JavaString::from(id));
+    }
+    if upgrades.is_empty() {
+        nbt.remove(&key);
     }
 }
 
@@ -601,8 +631,7 @@ impl Game<'_> {
 
     pub(crate) fn mek_upgraded_capacity(id: &str, nbt: &Compound) -> Option<i64> {
         let (usage, ticks) = Self::mek_usage_and_ticks(id)?;
-        nbt.contains_key(&JavaString::from("component_upgrade"))
-            .then(|| upgrades_of(nbt).recalculated_capacity(usage, ticks))
+        is_recalculated(nbt).then(|| upgrades_of(nbt).recalculated_capacity(usage, ticks))
     }
 
     fn mek_cable_capacities(&self, cables: &[[i32; 3]]) -> Vec<i64> {
@@ -863,6 +892,16 @@ impl Game<'_> {
     /// `TileComponentUpgrade.tickServer`.
     pub(crate) fn mek_tick_upgrades(&mut self, entity: &mut horizon_client::containers::ModBlockEntity) {
         entity.items.resize(MACHINE_SLOTS, None);
+        // The real mod never saves an empty `component_upgrade`. A command can still give one.
+        if matches!(entity.nbt.get(&JavaString::from("component_upgrade")), Some(Tag::Compound(held)) if held.is_empty()) {
+            entity.nbt.remove(&JavaString::from("component_upgrade"));
+        }
+        // The real mod saves these slots under `component_upgrade`, so loading them recalculates.
+        if (entity.items[UPGRADE_INPUT].is_some() || entity.items[UPGRADE_OUTPUT].is_some())
+            && !is_recalculated(&entity.nbt)
+        {
+            mark_recalculated(&mut entity.nbt);
+        }
         let found = entity.items[UPGRADE_INPUT].clone().and_then(|stack| {
             self.mek_upgrade_kind(&stack).map(|kind| (kind, stack.count as i32))
         });
