@@ -1,5 +1,6 @@
 // What Mekanism's blocks share in the game: side configuration, energy between blocks, and cable
 // networks. The rules that need no game types are in `mekmachine_engine`.
+use mekmachine_engine::upgrades::Upgrades;
 use super::Game;
 use horizon_core::geometry::Direction;
 use horizon_world::nbt::{Compound, JavaString, Tag};
@@ -110,6 +111,9 @@ pub(crate) const DATA_ENERGY: usize = 2;
 pub(crate) const DATA_CAPACITY: usize = 3;
 pub(crate) const DATA_ITEM_SIDES: usize = 4;
 pub(crate) const DATA_ENERGY_SIDES: usize = 5;
+pub(crate) const DATA_USING: usize = 6;
+/// The menu's data slots, the same for every machine. The oxidizer also fills the chemical ones.
+pub(crate) const DATA_SLOTS: usize = 10;
 /// The data slots of the generator's menu.
 pub(crate) const GENERATOR_DATA_LAVA: usize = 0;
 pub(crate) const GENERATOR_DATA_ENERGY: usize = 1;
@@ -122,6 +126,7 @@ pub(crate) const BUTTONS_PER_ROW: i32 = 6;
 /// The values a side cycles through, in the order `SideConfig` offers them for one-slot machines.
 pub(crate) const ITEM_SIDE_CYCLE: [i32; 4] = [0, SIDE_INPUT, SIDE_OUTPUT, SIDE_ENERGY];
 pub(crate) const ENERGY_SIDE_CYCLE: [i32; 2] = [0, SIDE_INPUT];
+pub(crate) const CHEMICAL_SIDE_CYCLE: [i32; 2] = [0, SIDE_OUTPUT];
 
 /// The bits above a packed side config in a data slot: whether that kind ejects.
 pub(crate) const EJECT_BIT: i32 = 12;
@@ -131,13 +136,32 @@ pub(crate) const ENERGY_EJECT: &str = "eject0";
 
 /// A side config packed into a data slot, 2 bits a side, as an index into its cycle.
 pub(crate) fn pack_sides(nbt: &Compound, config: &str, cycle: &[i32]) -> i32 {
-    let eject = if config == ITEM_CONFIG { ITEM_EJECT } else { ENERGY_EJECT };
+    let eject = match config {
+        ITEM_CONFIG => ITEM_EJECT,
+        super::chem::CHEMICAL_CONFIG => super::chem::EJECT,
+        _ => ENERGY_EJECT,
+    };
     let packed = (0..SIDES).fold(0, |packed, index| {
         let value = side_value(nbt, config, index);
         let position = cycle.iter().position(|v| *v == value).unwrap_or(0) as i32;
         packed | (position << (2 * index))
     });
     packed | (i32::from(is_ejecting(nbt, eject)) << EJECT_BIT)
+}
+
+/// `component_upgrade: {upgrades: {"mekanism:speed": 4}}`, as the real mod saves it.
+pub(crate) fn upgrades_of(nbt: &Compound) -> Upgrades {
+    let Some(Tag::Compound(component)) = nbt.get(&JavaString::from("component_upgrade")) else {
+        return Upgrades::default();
+    };
+    let Some(Tag::Compound(installed)) = component.get(&JavaString::from("upgrades")) else {
+        return Upgrades::default();
+    };
+    let count = |name: &str| match installed.get(&JavaString::from(name)) {
+        Some(Tag::Int(count)) => (*count).max(0) as u32,
+        _ => 0,
+    };
+    Upgrades { speed: count("mekanism:speed"), energy: count("mekanism:energy") }
 }
 
 pub(crate) fn is_ejecting(nbt: &Compound, eject: &str) -> bool {
@@ -348,6 +372,11 @@ impl Game<'_> {
         }
     }
 
+    /// Whether a block uses `gui.rs`'s screen.
+    pub(crate) fn mek_has_machine_screen(block: &str) -> bool {
+        Self::mek_is_machine(block) || block == super::chem::OXIDIZER
+    }
+
     pub(crate) fn mek_is_machine(block: &str) -> bool {
         matches!(
             block,
@@ -435,6 +464,32 @@ impl Game<'_> {
             .sum()
     }
 
+    /// What a machine's saved upgrades give, and whether its redstone control lets it run this tick.
+    pub(crate) fn mek_may_run(&mut self, pos: [i32; 3], nbt: &Compound) -> bool {
+        let control = match nbt.get(&JavaString::from("control_type")) {
+            Some(Tag::String(mode)) => mode.to_string_lossy(),
+            _ => return true,
+        };
+        let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+        let powered = self.with_level(|b, level, ticks| b.has_neighbor_signal(level, ticks, at));
+        mekmachine_engine::upgrades::may_run(&control, powered)
+    }
+
+    /// `MachineEnergyContainer`'s capacity when upgrades change it from what `energy.rs` declares.
+    fn mek_upgraded_capacity(id: &str, nbt: &Compound) -> Option<i64> {
+        let (usage, ticks) = match id {
+            "mekanism:enrichment_chamber" | "mekanism:energized_smelter" => (5, 200),
+            "mekanism:crusher" => (8, 200),
+            super::chem::OXIDIZER => {
+                use mekmachine_engine::chemical::{OXIDIZER_TICKS, OXIDIZER_USAGE};
+                (OXIDIZER_USAGE, OXIDIZER_TICKS)
+            }
+            _ => return None,
+        };
+        let upgrades = upgrades_of(nbt);
+        (upgrades != Upgrades::default()).then(|| upgrades.capacity(usage, ticks))
+    }
+
     fn mek_write_cable(&mut self, pos: [i32; 3], energy: i64) {
         let key = (pos[0], pos[1], pos[2]);
         let mut seen_change = false;
@@ -468,6 +523,9 @@ impl Game<'_> {
         if nbt_side != SIDE_INPUT {
             return 0;
         }
+        if let Some(capacity) = Self::mek_upgraded_capacity(&id, nbt) {
+            return (capacity - energy_of(nbt)).max(0);
+        }
         i64::from(self.native_energy_insert(pos, side, i32::MAX, true))
     }
 
@@ -485,6 +543,19 @@ impl Game<'_> {
         if self.mek_is_cable(pos) {
             let held = self.mek_saved(pos).map_or(0, |(_, nbt)| energy_of(nbt));
             self.mek_write_cable(pos, held + room);
+            return room;
+        }
+        if let Some((id, nbt)) = self.mek_saved(pos)
+            && Self::mek_upgraded_capacity(&id, nbt).is_some()
+        {
+            let energy = energy_of(nbt) + room;
+            let key = (pos[0], pos[1], pos[2]);
+            if let Some(horizon_client::containers::BlockEntity::Mod(entity)) =
+                self.world.block_entities.get_mut(&key)
+            {
+                entity.nbt.insert(JavaString::from("energy"), Tag::Int(energy as i32));
+                self.world.modified.insert((key.0 >> 4, key.2 >> 4));
+            }
             return room;
         }
         i64::from(self.native_energy_insert(pos, side, room as i32, false))

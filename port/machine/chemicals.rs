@@ -77,7 +77,14 @@ fn mekmachine_chemicals(
         },
     };
     let before = machine.input.as_ref().map_or(0, |input| input.count);
-    machine.tick_for(&Oxidizing { game: &*game }, chemical::OXIDIZER_USAGE, chemical::OXIDIZER_TICKS);
+    let upgrades = crate::game::mek::upgrades_of(&entity.nbt);
+    let ticks = upgrades.ticks(chemical::OXIDIZER_TICKS);
+    let energy_per_tick = upgrades.energy_per_tick(chemical::OXIDIZER_USAGE);
+    if game.mek_may_run(pos, &entity.nbt) {
+        machine.tick_for(&Oxidizing { game: &*game }, energy_per_tick, ticks);
+    } else {
+        machine.active = false;
+    }
     let finished = machine.input.as_ref().map_or(0, |input| input.count) < before;
 
     let fields = &mut **entity;
@@ -107,11 +114,19 @@ fn mekmachine_chemicals(
             used.insert(JavaString::from(recipe.as_str()), Tag::Int(count + 1));
         }
     }
-    let mut data = vec![0; 8];
+    use crate::game::mek;
+    let mut data = vec![0; mek::DATA_SLOTS];
+    data[mek::DATA_USING] = if machine.active { energy_per_tick as i32 } else { 0 };
+    data[mek::DATA_ITEM_SIDES] = mek::pack_sides(&fields.nbt, mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE);
+    data[mek::DATA_ENERGY_SIDES] = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
+    data[chem::DATA_CHEMICAL_SIDES] = mek::pack_sides(&fields.nbt, chem::CHEMICAL_CONFIG, &mek::CHEMICAL_SIDE_CYCLE);
+    data[chem::DATA_CHEMICAL_KIND] = machine.output.held.as_ref().map_or(0, |held| {
+        chem::OXIDIZED.iter().position(|(id, _)| *id == held.id).map_or(0, |place| place as i32 + 1)
+    });
     data[crate::game::mek::DATA_PROGRESS] = machine.progress;
-    data[crate::game::mek::DATA_TICKS] = chemical::OXIDIZER_TICKS;
+    data[crate::game::mek::DATA_TICKS] = ticks;
     data[crate::game::mek::DATA_ENERGY] = machine.energy as i32;
-    data[crate::game::mek::DATA_CAPACITY] = chemical::OXIDIZER_USAGE as i32 * 4;
+    data[crate::game::mek::DATA_CAPACITY] = upgrades.capacity(chemical::OXIDIZER_USAGE, chemical::OXIDIZER_TICKS) as i32;
     data[chem::DATA_CHEMICAL] = machine.output.held.as_ref().map_or(0, |held| held.amount as i32);
     fields.data = data;
 }

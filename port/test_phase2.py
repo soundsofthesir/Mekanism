@@ -17,10 +17,7 @@ fixed shift of one tick, and the first load, where vanilla was placed first, mus
 """
 
 import argparse
-import shutil
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Callable, NamedTuple
@@ -28,6 +25,8 @@ from typing import Callable, NamedTuple
 from horizon_driver import (
     DedicatedServer,
     SinglePlayer,
+    begin_checks,
+    run_test,
     TestFailure,
     run_function,
     write_functions,
@@ -268,6 +267,7 @@ def scenario_run(world, trace: Path) -> None:
         if scenario.later:
             run_function(world, f"later_{scenario.name}")
     time.sleep(RUN_TICKS_BEFORE_RELOAD / TICKS_PER_SECOND)
+    begin_checks()
     if world.has_player:
         print("Menu:")
         check_menu(world)
@@ -290,22 +290,13 @@ def main() -> int:
     args = parser.parse_args()
     if args.dedicated and not args.eula:
         parser.error("--dedicated writes eula=true: pass --eula if you agree to the Minecraft EULA")
-    folder = Path(tempfile.mkdtemp(dir=WORK))
-    trace = folder / "trace.txt"
     kind = DedicatedServer if args.dedicated else SinglePlayer
-    world = kind(folder, args.engine.resolve(), {"MEKMACHINE_TRACE": trace})
-    try:
-        scenario_run(world, trace)
-    except (TestFailure, subprocess.TimeoutExpired) as failure:
-        try:
-            world.stop()
-        except (TestFailure, subprocess.TimeoutExpired):
-            pass
-        print(f"FAIL: {failure}\nFiles kept in {folder}", file=sys.stderr)
-        return 1
-    shutil.rmtree(folder)
-    print("PASS")
-    return 0
+
+    def make(folder: Path):
+        world = kind(folder, args.engine.resolve(), {"MEKMACHINE_TRACE": folder / "trace.txt"})
+        return world
+
+    return run_test(make, lambda world: scenario_run(world, world.folder / "trace.txt"))
 
 
 if __name__ == "__main__":

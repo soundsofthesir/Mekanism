@@ -9,14 +9,11 @@ the real mod's screens, because they need a client.
 
 import argparse
 import re
-import shutil
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
-from horizon_driver import SinglePlayer, TestFailure, install_content
+from horizon_driver import SinglePlayer, TestFailure, install_content, begin_checks, run_test
 
 HERE = Path(__file__).resolve().parent
 WORK = HERE / ".work"
@@ -184,6 +181,7 @@ def run(world, screenshot: Path | None) -> None:
     world.start()
     world.command("forceload add 0 -16 16 16")
     time.sleep(SETTLE_SECONDS)
+    begin_checks()
     print("Defaults:")
     check_defaults(world)
     print("Menu:")
@@ -200,22 +198,15 @@ def main() -> int:
     parser.add_argument("--engine", type=Path, required=True)
     parser.add_argument("--screenshot", type=Path)
     args = parser.parse_args()
-    folder = Path(tempfile.mkdtemp(dir=WORK))
-    world = SinglePlayer(folder, args.engine.resolve(), {})
-    install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
     screenshot = args.screenshot.resolve() if args.screenshot else None
-    try:
-        run(world, screenshot)
-    except (TestFailure, subprocess.TimeoutExpired) as failure:
-        try:
-            world.stop()
-        except (TestFailure, subprocess.TimeoutExpired):
-            pass
-        print(f"FAIL: {failure}\nFiles kept in {folder}", file=sys.stderr)
-        return 1
-    shutil.rmtree(folder)
-    print("PASS")
-    return 0
+    kind = SinglePlayer
+
+    def make(folder: Path):
+        world = kind(folder, args.engine.resolve(), {})
+        install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
+        return world
+
+    return run_test(make, lambda world: run(world, screenshot))
 
 
 if __name__ == "__main__":

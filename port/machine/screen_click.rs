@@ -12,7 +12,7 @@ fn mekmachine_screen_press(
     const LEFT_BUTTON: i32 = 0;
     const RIGHT_BUTTON: i32 = 1;
     const SHIFT: u32 = 1;
-    if !screen.menu.is_some_and(crate::game::Game::mek_is_machine) {
+    if !screen.menu.is_some_and(crate::game::Game::mek_has_machine_screen) {
         return;
     }
     let click = match button {
@@ -23,7 +23,7 @@ fn mekmachine_screen_press(
     };
     let origin = gui::origin();
     let at = [screen.mouse[0] - origin[0], screen.mouse[1] - origin[1]];
-    match press(at, gui::open_kind(), click) {
+    match press(at, gui::open_kind(), gui::shown_kinds(), click) {
         Press::Pass => return,
         Press::Nothing => {}
         Press::OpenWindow => gui::set_open_kind(Some(mekmachine_engine::gui_layout::ITEM_KIND)),

@@ -1,6 +1,7 @@
 // Mekanism's own GUI art in the game: its sprites, nine-slices and the machine screen's elements. The
 // positions and what a press does are in `mekmachine_engine::gui_layout`.
 use super::Game;
+use super::chem;
 use super::mek;
 use horizon_client::hud::HudBatch;
 use mekmachine_engine::gui_layout as layout;
@@ -14,6 +15,7 @@ const TEXT_HEADING: u32 = 0x20_2020;
 const TEXT_SUBHEADING: u32 = 0x78_7878;
 const TAB_ENERGY_CONFIG: u32 = 0xFF59_C15F;
 const TAB_ITEM_CONFIG: u32 = 0xFFCF_CFCF;
+const TAB_CHEMICAL_CONFIG: u32 = 0xFFFF_DD4F;
 const TAB_REDSTONE: u32 = 0xFFC9_071F;
 const TAB_SECURITY: u32 = 0xFFFF_A160;
 const TAB_XP: u32 = 0xFF80_FF20;
@@ -24,10 +26,17 @@ const SIDE_NONE: u32 = 0xCF_CFCF;
 const SIDE_INPUT: u32 = 0xC9_071F;
 const SIDE_OUTPUT: u32 = 0x36_6BD0;
 const SIDE_ENERGY: u32 = 0x59_C15F;
+/// `ChemicalConstants.SULFUR_DIOXIDE`. Other chemicals' tints and textures aren't ported.
+const SULFUR_DIOXIDE_TINT: u32 = 0xFFA9_9D90;
+/// `FluidDeferredRegister.LIQUID`, copied where the atlas looks, and its tile.
+const LIQUID_SPRITE: &str = "mekanism:block/port_liquid";
+const LIQUID_TILE: f32 = 16.0;
 
 thread_local! {
     /// The kind the open side config window shows. The window is the client's own, as in the real mod.
     static WINDOW: Cell<Option<usize>> = const { Cell::new(None) };
+    /// The kinds the open screen's window lists, in tab order.
+    static KINDS: Cell<&'static [usize]> = const { Cell::new(layout::ELECTRIC_KINDS) };
     /// The screen's top left, from the last draw.
     static ORIGIN: Cell<[f32; 2]> = const { Cell::new([0.0, 0.0]) };
     /// The menu's data slots, from the last draw, for the window drawn after the items.
@@ -40,6 +49,10 @@ fn sprite(path: &str) -> String {
 
 pub(crate) fn origin() -> [f32; 2] {
     ORIGIN.get()
+}
+
+pub(crate) fn shown_kinds() -> &'static [usize] {
+    KINDS.get()
 }
 
 pub(crate) fn open_kind() -> Option<usize> {
@@ -152,15 +165,13 @@ impl Game<'_> {
         self.native_text(batch, text, [middle - width / 2.0, y], rgb, false);
     }
 
-    /// `GuiElectricMachine` over `GuiMekanism`'s background.
-    pub(crate) fn gui_machine(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2]) {
+    /// What every machine screen shares: the panel, the inventory's slots and the tabs.
+    fn gui_base(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2], kinds: &'static [usize]) {
         ORIGIN.set(origin);
+        KINDS.set(kinds);
         DATA.with_borrow_mut(|saved| data.clone_into(saved));
         let [ox, oy] = origin;
-        let at = |[x, y, w, h]: [f32; 4]| [ox + x, oy + y, w, h];
-        let get = |slot: usize| data.get(slot).copied().unwrap_or(0);
         self.gui_panel(batch, [ox, oy, layout::SCREEN_WIDTH, layout::SCREEN_HEIGHT]);
-
         let [ix, iy] = layout::INVENTORY;
         for row in 0..4 {
             let y = if row == 3 { layout::HOTBAR_Y } else { iy + 18.0 * row as f32 };
@@ -169,6 +180,35 @@ impl Game<'_> {
                 self.gui_whole(batch, "slot/normal", [ox + x - 1.0, oy + y - 1.0, 18.0, 18.0]);
             }
         }
+    }
+
+    fn gui_tabs(&self, batch: &mut HudBatch, origin: [f32; 2]) {
+        let [ox, oy] = origin;
+        self.gui_tab(batch, origin, layout::SIDE_CONFIG_TAB, "button/configuration", TAB_PLAIN);
+        self.gui_tab(batch, origin, layout::TRANSPORTER_TAB, "button/transporter_config", TAB_PLAIN);
+        self.gui_tab(batch, origin, layout::UPGRADE_TAB, "button/upgrade", TAB_PLAIN);
+        self.gui_tab(batch, origin, layout::SECURITY_TAB, "security/public", TAB_SECURITY);
+        self.gui_tab(batch, origin, layout::XP_TAB, "tab/xp_containment", TAB_XP);
+        self.gui_tab(batch, origin, layout::REDSTONE_TAB, "redstone_control/disabled", TAB_REDSTONE);
+        let [ex, ey] = layout::ENERGY_TAB;
+        self.gui_whole(batch, "tab/energy_info", [ox + ex, oy + ey, layout::TAB_SIZE, layout::TAB_SIZE]);
+    }
+
+    fn gui_labels(&self, batch: &mut HudBatch, origin: [f32; 2], title_y: f32) {
+        let [ox, oy] = origin;
+        if let Some(title) = self.native_screen_title() {
+            self.gui_centred(batch, &title, ox + layout::SCREEN_WIDTH / 2.0, oy + title_y, TEXT_TITLE);
+        }
+        let inventory = self.translate("container.inventory", "Inventory");
+        self.native_text(batch, &inventory, [ox + 8.0, oy + layout::INVENTORY[1] - 11.0], TEXT_TITLE, false);
+    }
+
+    /// `GuiElectricMachine` over `GuiMekanism`'s background.
+    pub(crate) fn gui_machine(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2]) {
+        self.gui_base(batch, data, origin, layout::ELECTRIC_KINDS);
+        let [ox, oy] = origin;
+        let at = |[x, y, w, h]: [f32; 4]| [ox + x, oy + y, w, h];
+        let get = |slot: usize| data.get(slot).copied().unwrap_or(0);
         // `SlotType.get(DataType)`: input, output and energy, each with its own frame.
         for (slot, path) in layout::CHAMBER_SLOTS.into_iter().zip(["slot/input", "slot/output", "slot/power"]) {
             self.gui_whole(batch, path, [ox + slot[0] - 1.0, oy + slot[1] - 1.0, 18.0, 18.0]);
@@ -181,8 +221,8 @@ impl Game<'_> {
         let total = get(mek::DATA_TICKS);
         if get(mek::DATA_PROGRESS) > 0 && total > 0 {
             let share = (get(mek::DATA_PROGRESS) as f32 / total as f32).min(1.0);
-            // `calculateProgressSize`: the bar's inside, with at least a pixel showing.
-            let filled = (share * (pw - 3.0)).ceil() + 1.0;
+            // `ProgressType.BAR` starts a pixel in on each side.
+            let filled = layout::progress_size(share, pw - 2.0);
             self.gui_part(batch, "progress/bar/full", [1.0, 0.0, filled, ph], [ox + px + 1.0, oy + py, filled, ph], WHITE);
         }
 
@@ -191,26 +231,79 @@ impl Game<'_> {
         let capacity = get(mek::DATA_CAPACITY).max(1);
         let level = (get(mek::DATA_ENERGY) as f64 / f64::from(capacity)).min(1.0);
         if level > 0.0 {
-            // `GuiBar.calculateSize`.
-            let filled = (level * f64::from(bh - 3.0)).ceil() as f32 + 1.0;
+            let filled = layout::bar_size(level, bh - 2.0);
             let dst = [ox + bx + 1.0, oy + by + bh - 1.0 - filled, bw - 2.0, filled];
             self.gui_tile(batch, "bar/vertical_power", [0.0, 0.0, 2.0, 2.0], dst, WHITE);
         }
+        self.gui_tabs(batch, origin);
+        self.gui_labels(batch, origin, layout::TITLE_Y);
+    }
 
-        self.gui_tab(batch, origin, layout::SIDE_CONFIG_TAB, "button/configuration", TAB_PLAIN);
-        self.gui_tab(batch, origin, layout::TRANSPORTER_TAB, "button/transporter_config", TAB_PLAIN);
-        self.gui_tab(batch, origin, layout::UPGRADE_TAB, "button/upgrade", TAB_PLAIN);
-        self.gui_tab(batch, origin, layout::SECURITY_TAB, "security/public", TAB_SECURITY);
-        self.gui_tab(batch, origin, layout::XP_TAB, "tab/xp_containment", TAB_XP);
-        self.gui_tab(batch, origin, layout::REDSTONE_TAB, "redstone_control/disabled", TAB_REDSTONE);
-        let [ex, ey] = layout::ENERGY_TAB;
-        self.gui_whole(batch, "tab/energy_info", [ox + ex, oy + ey, layout::TAB_SIZE, layout::TAB_SIZE]);
-
-        if let Some(title) = self.native_screen_title() {
-            self.gui_centred(batch, &title, ox + layout::SCREEN_WIDTH / 2.0, oy + 6.0, TEXT_TITLE);
+    /// `GuiChemicalOxidizer`.
+    pub(crate) fn gui_oxidizer(&self, batch: &mut HudBatch, data: &[i32], origin: [f32; 2]) {
+        self.gui_base(batch, data, origin, layout::OXIDIZER_KINDS);
+        let [ox, oy] = origin;
+        let get = |slot: usize| data.get(slot).copied().unwrap_or(0);
+        // The input slot, the drain slot (`ContainerSlotType.EXTRA`) and the energy slot.
+        for (slot, path) in layout::OXIDIZER_SLOTS.into_iter().zip(["slot/input", "slot/extra", "slot/power"]) {
+            self.gui_whole(batch, path, [ox + slot[0] - 1.0, oy + slot[1] - 1.0, 18.0, 18.0]);
         }
-        let inventory = self.translate("container.inventory", "Inventory");
-        self.native_text(batch, &inventory, [ox + 8.0, oy + layout::INVENTORY[1] - 11.0], TEXT_TITLE, false);
+
+        let [px, py, pw, ph] = layout::OXIDIZER_PROGRESS;
+        self.gui_whole(batch, "progress/large_right/empty", [ox + px, oy + py, pw, ph]);
+        let total = get(mek::DATA_TICKS);
+        if get(mek::DATA_PROGRESS) > 0 && total > 0 {
+            let share = (get(mek::DATA_PROGRESS) as f32 / total as f32).min(1.0);
+            let filled = layout::progress_size(share, pw);
+            self.gui_part(batch, "progress/large_right/full", [0.0, 0.0, filled, ph], [ox + px, oy + py, filled, ph], WHITE);
+        }
+
+        let [gx, gy, gw, gh] = layout::OXIDIZER_GAUGE;
+        self.gui_nine(batch, "gauge/normal", [5.0, 5.0], 2.0, [ox + gx, oy + gy, gw, gh], WHITE);
+        let capacity = i64::from(mekmachine_engine::chemical::OXIDIZER_CAPACITY as i32);
+        let level = layout::gauge_level(i64::from(get(chem::DATA_CHEMICAL)), capacity, (gh - 2.0) as i32) as f32;
+        if level > 0.0 {
+            let tint = if get(chem::DATA_CHEMICAL_KIND) == 1 { SULFUR_DIOXIDE_TINT } else { WHITE };
+            self.gui_tile_sprite(batch, LIQUID_SPRITE, [ox + gx + 1.0, oy + gy + gh - 1.0 - level, gw - 2.0, level], tint);
+        }
+        self.gui_part(batch, "gauge/overlay/standard", [0.0, 0.0, gw - 2.0, gh - 2.0], [ox + gx + 1.0, oy + gy + 1.0, gw - 2.0, gh - 2.0], WHITE);
+
+        let [bx, by, bw, bh] = layout::OXIDIZER_POWER_BAR;
+        self.gui_nine(batch, "bar/base", [5.0, 5.0], 1.0, [ox + bx, oy + by, bw, bh], WHITE);
+        let energy_capacity = get(mek::DATA_CAPACITY).max(1);
+        let energy = (get(mek::DATA_ENERGY) as f64 / f64::from(energy_capacity)).min(1.0);
+        if energy > 0.0 {
+            let filled = layout::bar_size(energy, bw - 2.0);
+            self.gui_tile(batch, "bar/horizontal_power", [0.0, 0.0, 2.0, 2.0], [ox + bx + 1.0, oy + by + 1.0, filled, bh - 2.0], WHITE);
+        }
+        self.gui_tabs(batch, origin);
+        self.gui_labels(batch, origin, layout::OXIDIZER_TITLE_Y);
+    }
+
+    /// `GuiUtils.drawTiledSprite`, upwards from the bottom: a whole-frame tile of an atlas sprite.
+    fn gui_tile_sprite(&self, batch: &mut HudBatch, key: &str, dst: [f32; 4], tint: u32) {
+        let Some(whole) = self.gui.atlas.sprites.get(key).copied() else {
+            return;
+        };
+        let [x, y, w, h] = dst;
+        let [a, r, g, b] = tint.to_be_bytes();
+        let colour = u32::from_le_bytes([r, g, b, a]);
+        let (du, dv) = ((whole.u1 - whole.u0) / whole.w as f32, (whole.v1 - whole.v0) / whole.h as f32);
+        let mut up = 0.0;
+        while up < h {
+            let row = LIQUID_TILE.min(h - up);
+            let mut across = 0.0;
+            while across < w {
+                let column = LIQUID_TILE.min(w - across);
+                let mut rect = whole;
+                rect.u1 = rect.u0 + column * du;
+                rect.v0 = rect.v0 + (LIQUID_TILE - row) * dv;
+                rect.v1 = rect.v0 + row * dv;
+                batch.rect_uv(x + across, y + h - up - row, column, row, rect, colour);
+                across += column;
+            }
+            up += row;
+        }
     }
 
     /// `GuiSideConfiguration`, drawn after the items so it covers them.
@@ -225,17 +318,21 @@ impl Game<'_> {
         self.gui_nine(batch, "shadow", [9.0, 9.0], 3.0, [x - 3.0, y - 3.0, ww + 6.0, wh + 6.0], WHITE);
         self.gui_panel(batch, [x, y, ww, wh]);
 
-        for other in 0..layout::KINDS {
-            if other != kind {
-                let (icon, tint) = kind_look(other);
-                self.gui_tab(batch, origin, layout::kind_tab(other), icon, tint);
+        for (place, other) in KINDS.get().iter().enumerate() {
+            if *other != kind {
+                let (icon, tint) = kind_look(*other);
+                self.gui_tab(batch, origin, layout::kind_tab(place), icon, tint);
             }
         }
         let [cx, cy, size] = layout::CLOSE;
         self.gui_button(batch, [x + cx, y + cy, size, size], WHITE);
         self.gui_whole_scaled(batch, "button/close", [12.0, 12.0], [x + cx, y + cy, size, size]);
         let middle = x + ww / 2.0;
-        let title = if kind == layout::ITEM_KIND { "Items Config" } else { "Energy Config" };
+        let title = match kind {
+            layout::ITEM_KIND => "Items Config",
+            layout::CHEMICAL_KIND => "Chemicals Config",
+            _ => "Energy Config",
+        };
         self.gui_centred(batch, title, middle, y + 5.0, TEXT_HEADING);
         self.gui_centred(batch, "Slots", middle, y + 120.0, TEXT_SUBHEADING);
 
@@ -265,7 +362,7 @@ impl Game<'_> {
     }
 
     /// What the cursor is over, for `GuiElement.renderToolTip`.
-    pub(crate) fn gui_tooltip(&self, data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
+    pub(crate) fn gui_tooltip(&self, block: &str, data: &[i32], at: [f32; 2], lines: &mut Vec<String>) {
         let on_tab = |tab: [f32; 2]| {
             let [x, y] = layout::tab_button_at(tab);
             at[0] >= x && at[0] < x + layout::TAB_BUTTON && at[1] >= y && at[1] < y + layout::TAB_BUTTON
@@ -288,11 +385,21 @@ impl Game<'_> {
         if on_tab(layout::SIDE_CONFIG_TAB) {
             lines.push("Side Config".to_owned());
         }
-        let [bx, by, bw, bh] = layout::POWER_BAR;
-        if at[0] >= bx && at[0] < bx + bw && at[1] >= by && at[1] < by + bh {
-            let energy = data.get(mek::DATA_ENERGY).copied().unwrap_or(0);
-            let capacity = data.get(mek::DATA_CAPACITY).copied().unwrap_or(0);
-            lines.push(format!("{energy}/{capacity} FE"));
+        let on = |[x, y, w, h]: [f32; 4]| at[0] >= x && at[0] < x + w && at[1] >= y && at[1] < y + h;
+        let get = |slot: usize| i64::from(data.get(slot).copied().unwrap_or(0));
+        let (energy, capacity) = (get(mek::DATA_ENERGY), get(mek::DATA_CAPACITY));
+        let oxidizer = block == chem::OXIDIZER;
+        if on(if oxidizer { layout::OXIDIZER_POWER_BAR } else { layout::POWER_BAR }) {
+            lines.push(layout::energy_fraction(energy, capacity));
+        }
+        let [ex, ey] = layout::ENERGY_TAB;
+        if on([ex, ey, layout::TAB_SIZE, layout::TAB_SIZE]) {
+            lines.extend(layout::energy_tab_lines(get(mek::DATA_USING), (capacity - energy).max(0)));
+        }
+        if oxidizer && on(layout::OXIDIZER_GAUGE) {
+            let kind = usize::try_from(get(chem::DATA_CHEMICAL_KIND) - 1).ok();
+            let name = kind.and_then(|place| chem::OXIDIZED.get(place)).map(|(_, name)| *name);
+            lines.extend(layout::gauge_lines(name, get(chem::DATA_CHEMICAL)));
         }
     }
 }
@@ -300,27 +407,27 @@ impl Game<'_> {
 const SIDE_NAMES: [&str; 6] = ["Front", "Left", "Right", "Back", "Top", "Bottom"];
 
 fn kind_look(kind: usize) -> (&'static str, u32) {
-    if kind == layout::ITEM_KIND {
-        ("transmission/items", TAB_ITEM_CONFIG)
-    } else {
-        ("transmission/energy", TAB_ENERGY_CONFIG)
+    match kind {
+        layout::ITEM_KIND => ("transmission/items", TAB_ITEM_CONFIG),
+        layout::CHEMICAL_KIND => ("transmission/chemicals", TAB_CHEMICAL_CONFIG),
+        _ => ("transmission/energy", TAB_ENERGY_CONFIG),
     }
 }
 
 fn sides_slot(kind: usize) -> usize {
-    if kind == layout::ITEM_KIND {
-        mek::DATA_ITEM_SIDES
-    } else {
-        mek::DATA_ENERGY_SIDES
+    match kind {
+        layout::ITEM_KIND => mek::DATA_ITEM_SIDES,
+        layout::CHEMICAL_KIND => chem::DATA_CHEMICAL_SIDES,
+        _ => mek::DATA_ENERGY_SIDES,
     }
 }
 
 /// A side's saved value, from a data slot's 2 bits a side.
 fn side_of(packed: i32, kind: usize, index: usize) -> i32 {
     let position = mek::unpack_side(packed, index);
-    if kind == layout::ITEM_KIND {
-        mek::ITEM_SIDE_CYCLE[position]
-    } else {
-        mek::ENERGY_SIDE_CYCLE[position & 1]
+    match kind {
+        layout::ITEM_KIND => mek::ITEM_SIDE_CYCLE[position],
+        layout::CHEMICAL_KIND => mek::CHEMICAL_SIDE_CYCLE[position & 1],
+        _ => mek::ENERGY_SIDE_CYCLE[position & 1],
     }
 }

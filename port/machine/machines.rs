@@ -114,7 +114,14 @@ fn mekmachine_machines(
         },
     };
     let was_active = machine.active;
-    machine.tick(&Lookup { game: &*game, kind }, usage);
+    let upgrades = mek::upgrades_of(&entity.nbt);
+    let ticks = upgrades.ticks(mekmachine_engine::recipe_machine::TICKS_REQUIRED);
+    let energy_per_tick = upgrades.energy_per_tick(usage);
+    if game.mek_may_run(pos, &entity.nbt) {
+        machine.tick_for(&Lookup { game: &*game, kind }, energy_per_tick, ticks);
+    } else {
+        machine.active = false;
+    }
 
     let fields = &mut **entity;
     fields.items.resize(SLOTS, None);
@@ -129,11 +136,12 @@ fn mekmachine_machines(
     use crate::game::mek;
     let item_sides = mek::pack_sides(&fields.nbt, mek::ITEM_CONFIG, &mek::ITEM_SIDE_CYCLE);
     let energy_sides = mek::pack_sides(&fields.nbt, mek::ENERGY_CONFIG, &mek::ENERGY_SIDE_CYCLE);
-    let mut data = vec![0; 6];
+    let mut data = vec![0; mek::DATA_SLOTS];
+    data[mek::DATA_USING] = if machine.active { energy_per_tick as i32 } else { 0 };
     data[mek::DATA_PROGRESS] = machine.progress;
-    data[mek::DATA_TICKS] = mekmachine_engine::recipe_machine::TICKS_REQUIRED;
+    data[mek::DATA_TICKS] = ticks;
     data[mek::DATA_ENERGY] = machine.energy as i32;
-    data[mek::DATA_CAPACITY] = (usage * 4) as i32;
+    data[mek::DATA_CAPACITY] = upgrades.capacity(usage, mekmachine_engine::recipe_machine::TICKS_REQUIRED) as i32;
     data[mek::DATA_ITEM_SIDES] = item_sides;
     data[mek::DATA_ENERGY_SIDES] = energy_sides;
     fields.data = data;

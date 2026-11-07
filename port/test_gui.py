@@ -12,13 +12,11 @@ import argparse
 import math
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
-from horizon_driver import SinglePlayer, TestFailure, install_content
+from horizon_driver import SinglePlayer, TestFailure, install_content, begin_checks, run_test
 from png_tools import Image
 
 HERE = Path(__file__).resolve().parent
@@ -231,6 +229,7 @@ def run(world, art: Path, screenshot: Path | None, folder: Path) -> None:
     world.command("tick freeze")
     world.ctl("interact", x, Y, z)
     time.sleep(SETTLE_SECONDS)
+    begin_checks()
     origin = origin_of(world)
     gui_width = world.ctl("ui")["gui_size"][0]
     first = shot(world, folder / "scale.png", origin, 1)
@@ -255,21 +254,16 @@ def main() -> int:
     parser.add_argument("--art", type=Path, required=True)
     parser.add_argument("--screenshot", type=Path)
     args = parser.parse_args()
-    folder = Path(tempfile.mkdtemp(dir=WORK))
-    world = SinglePlayer(folder, args.engine.resolve(), {})
-    install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
-    try:
-        run(world, args.art.resolve(), args.screenshot.resolve() if args.screenshot else None, folder)
-    except (TestFailure, subprocess.TimeoutExpired) as failure:
-        try:
-            world.stop()
-        except (TestFailure, subprocess.TimeoutExpired):
-            pass
-        print(f"FAIL: {failure}\nFiles kept in {folder}", file=sys.stderr)
-        return 1
-    shutil.rmtree(folder)
-    print("PASS")
-    return 0
+    art = args.art.resolve()
+    screenshot = args.screenshot.resolve() if args.screenshot else None
+    kind = SinglePlayer
+
+    def make(folder: Path):
+        world = kind(folder, args.engine.resolve(), {})
+        install_content(world.content_dir, WORK / "check/carry", WORK / "check-generators/carry")
+        return world
+
+    return run_test(make, lambda world: run(world, art, screenshot, world.folder))
 
 
 if __name__ == "__main__":

@@ -27,7 +27,9 @@ fn mekmachine_screen_draw(
         game.native_text(batch, &temperature, [x + 56.0, y + 38.0], TEXT, false);
         return;
     }
-    if crate::game::Game::mek_is_machine(block) {
+    if block == crate::game::chem::OXIDIZER {
+        game.gui_oxidizer(batch, data, origin);
+    } else if crate::game::Game::mek_is_machine(block) {
         game.gui_machine(batch, data, origin);
     }
 }
