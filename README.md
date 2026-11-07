@@ -68,8 +68,8 @@ The scripts named `port/java_reference_*.py` record the real mod. They need a Ne
 - `port` also holds the Python tests, the recorders and the tools that carry Mekanism's content over.
 - `probe` is the Phase 0 probe, a small native mod that checks a ticking block keeps its state through save and load.
 - `PLAN.md` is the plan, with each phase's results.
-- `LICENSE` is Mekanism's licence.
+- `LICENSE` is the MIT licence, with both copyright notices.
 
 ## Licence
 
-Mekanism is MIT licensed. See `LICENSE` for its copyright notice and terms. This repository does not state a licence for the port's own code.
+The port is released under the MIT licence. See `LICENSE`. The port's own code is copyright 2026 soundsofthesir. Code and content carried over from Mekanism keep Mekanism's copyright notice, which `LICENSE` also includes.
